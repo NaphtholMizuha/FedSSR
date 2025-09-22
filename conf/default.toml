@@ -1,0 +1,26 @@
+# task
+model = 'shufflenet'
+dataset = 'cifar10'
+split = 'iid'
+# dir_alpha = 0.5
+
+# system
+n_client = 20
+m_client = 0
+n_server = 1
+m_server = 0
+n_round = 100
+
+# training
+n_epoch = 3
+learning_rate = 1e-3
+device = 'cuda'
+datapath = '/data'
+batch_size = 32
+num_workers = 0
+
+# security
+attack = 'none'
+aggregation = 'fedavg'
+selection_fraction = 0.34
+method = 'baseline'
