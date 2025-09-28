@@ -29,7 +29,7 @@ class Trainer:
         )
         self.test_loader = DataLoader(test_set, batch_size=bs, num_workers=nw)
         self.criterion = nn.CrossEntropyLoss().to(device)
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr, momentum=0.9)
+        self.optimizer = torch.optim.AdamW(params=self.model.parameters(), lr=lr)
         self.device = device
         self.lr = lr
         self.state = self.flat(deepcopy(init_state)).to(device)
