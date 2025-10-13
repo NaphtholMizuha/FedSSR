@@ -22,5 +22,5 @@ num_workers = 2
 # security
 attack = 'ss-max'
 aggregation = 'fedavg'
-selection_fraction = 0.33
+selection_fraction = 0.5
 method = 'stateful'

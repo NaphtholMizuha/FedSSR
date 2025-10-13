@@ -436,7 +436,10 @@ class Experiment:
 
             logger.success("Multi-target credit model retrained. Credits updated.")
             logger.info(
-                f"Learned credit matrix (sample for first 5 clients):\n{new_credits_matrix[:5]}"
+                f"Learned credit matrix :\n{new_credits_matrix}"
+            )
+            logger.info(
+                f"New credit:\n{new_credits_vector}"
             )
 
         except Exception as e:
