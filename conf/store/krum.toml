@@ -14,13 +14,13 @@ n_round = 250
 # training
 n_epoch = 3
 learning_rate = 1e-3
-device = 'cuda'
+device = 'cuda:1'
 datapath = '/data'
 batch_size = 32
 num_workers = 2
 
 # security
-attack = 'ascent'
+attack = 'min-max-uv'
 aggregation = 'krum'
-selection_fraction = 0.25
+selection_fraction = 0.33
 method = 'baseline'

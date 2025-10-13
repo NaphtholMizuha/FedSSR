@@ -20,7 +20,7 @@ batch_size = 32
 num_workers = 2
 
 # security
-attack = 'ascent'
+attack = 'min-max-uv'
 aggregation = 'fedavg'
-selection_fraction = 0.25
+selection_fraction = 0.33
 method = 'baseline'

@@ -16,6 +16,7 @@ dependencies = [
     "toml>=0.10.2",
     "torch>=2.7.0",
     "torchvision>=0.22.0",
+    "typer>=0.15.1",
 ]
 
 

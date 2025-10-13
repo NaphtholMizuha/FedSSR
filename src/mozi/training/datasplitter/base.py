@@ -12,6 +12,7 @@ class DataSplitter():
         subsets = []
         for idcs in idcs_li:
             subsets.append(Subset(self.dataset, idcs))
+        print([(i, len(subsets[i])) for i in range(len(subsets))])
         return subsets
     
     def split(self):

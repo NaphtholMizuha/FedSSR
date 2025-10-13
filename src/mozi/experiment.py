@@ -9,12 +9,13 @@ from typing import Literal
 import polars as pl
 from datetime import datetime
 import os
-from sklearn.linear_model import Ridge, ElasticNet
+from sklearn.linear_model import Ridge
 from math import ceil
 import numpy as np
 
-TEMPERETURE = 0.1
-
+TEMPERATURE = 0.1
+IMPORTANCE_TEMPERATURE = 0.1
+NUM_SCORES = 2
 
 @dataclass
 class ExperimentConfig:
@@ -36,7 +37,7 @@ class ExperimentConfig:
     attack: str
     aggregation: str
     selection_fraction: float
-    method: Literal["ours", "baseline"]
+    method: Literal["stateful", "stateless", "baseline"]
     dir_alpha: float | None = None
 
 
@@ -69,7 +70,8 @@ class Experiment:
         self.max_history_size = 500
         self.credit_model = Ridge(alpha=1.0)
         self.retrain_interval = 5
-
+        self.score_importances = torch.ones(NUM_SCORES) / NUM_SCORES
+        self.prev_winner = 1
         # 定义结果文件的路径
         self.log_dir = "log"  # 可以自定义日志目录
         os.makedirs(self.log_dir, exist_ok=True)  # 确保目录存在
@@ -191,7 +193,7 @@ class Experiment:
         return loss, acc
     
     def mozi_fl(self, r: int, stateful=False):
-        # ... (1. 训练与攻击部分不变) ...
+        # local training and simulating attacks
         logger.info(f"Round {r}: Start Training")
         for client in self.clients:
             client.local_train(self.n_epoch)
@@ -199,72 +201,71 @@ class Experiment:
         client_updates = torch.stack([client.get_grad() for client in self.clients])
         client_updates = attack(client_updates, self.attack, self.m_client, self.n_client)
 
-        # --- 2. 客户端选择 ---
-        selected_index = self._get_selection_indices(r, stateful)
+        # select client sbubsets
+        selected_index = self._select_clients(num_selected=int(self.frac * self.n_client), temperature=0.3)
         logger.info(f"Round {r}: Server Selection:\n {selected_index}.")
 
-        # --- 3. 服务器聚合与评分 ---
-        server_updates, scores = self._get_server_updates_and_scores(client_updates, selected_index)
+        # aggregate and score
+        server_updates = self._get_server_updates(client_updates, selected_index)
 
-        # --- 4. 信誉系统管理 (仅在 stateful 模式下) ---
-        if stateful:
-            # 4a. 收集本轮的新证据
-            self._collect_regression_data(scores, selected_index)
-            
-            # 4b. 根据证据，在需要时更新我们的信念
-            self._update_credits_if_needed(r)
-            
-            # 4c. 记录并报告当前的信念状态
-            self._log_credit_stats()
+        scores = self._calc_scores(client_updates, server_updates)
 
-        # --- 5. 确定并分发全局更新 ---
-        winner = scores.argmax()
+        self._collect_regression_data(scores, selected_index)
+        self._update_credits_if_needed(r)
+        self._log_credit_stats()
+        
+
+        composite_scores = (scores * self.score_importances).sum(dim=1)
+
+        # identify and broadcast the `winner` update
+        winner = composite_scores.argmax()
         logger.success(f"Round {r}: Welcome our new winner: {winner.item()}!")
         global_update = server_updates[winner]
-
+        self.prev_winner = winner
         for client in self.clients:
             client.set_grad(global_update)
 
-        # --- 6. 测试与返回结果 ---
+        # test and log
         loss, acc = self.clients[-1].test()
         logger.success(f"Round {r}: Loss: {loss:.4f}, Acc: {acc * 100:.2f}!")
         return loss, acc
     
-    def _get_selection_indices(self, r: int, stateful: bool) -> torch.Tensor:
-        """根据模式（stateful/stateless）生成客户端选择索引。"""
-        num_selected = int(round(self.n_client * self.frac))
+    def _select_clients(self, num_selected: int, temperature: float = 0.1) -> torch.Tensor:
+        """
+        为每个服务器选择客户端。
+        对于 prev_winner，使用 softmax 概率采样。
+        对于其他服务器，使用随机采样。
 
-        if stateful:
-            # 完全复刻你代码中的“平移信誉”策略
-            scaled_credit = self.credit.cpu() / TEMPERETURE
-            min_credit = scaled_credit.min()
-            epsilon = 1e-4
-            shifted_credit = scaled_credit - min_credit + epsilon
-            credit_prob = shifted_credit / shifted_credit.sum()
+        Args:
+            num_selected (int): 要选择的客户端数量。
+            temperature (float): Softmax 的温度参数。
+        """
+        selection_list = []
+        for i in range(self.n_server):
+            if i == self.prev_winner:
+                # 1. 应用温度并计算 softmax 概率
+                # 确保 credit 在合适的设备上
+                logits = self.credit / temperature
+                probs = torch.softmax(logits, dim=0)
+                
+                # 2. 使用 multinomial 进行不重复采样
+                # torch.multinomial 需要概率在 CPU 上（如果你的 credit 在 GPU 上）
+                # 注意：replacement=False 确保不会重复选中同一个客户端
+                selected_indices = torch.multinomial(
+                    probs.cpu(), 
+                    num_samples=num_selected, 
+                    replacement=False
+                )
+                selection_list.append(selected_indices)
+            else:
+                # 其他 server 保持随机选择
+                selection_list.append(torch.randperm(self.n_client)[:num_selected])
+        
+        return torch.stack(selection_list)
+
             
-            logger.info("credit probabilities (sample)", credit_prob)
+    def _get_server_updates(self, client_updates: torch.Tensor, selected_index: torch.Tensor) -> torch.Tensor:
 
-            if torch.isnan(credit_prob).any():
-                logger.warning("Credit probabilities contained NaN. Falling back to uniform selection.")
-                credit_prob = torch.ones(self.n_client) / self.n_client
-
-            return torch.stack(
-                [
-                    torch.multinomial(credit_prob, num_selected, replacement=False)
-                    for _ in range(self.n_server)
-                ]
-            )
-        else:
-            # Stateless 模式
-            return torch.stack(
-                [
-                    torch.randperm(self.n_client)[:num_selected]
-                    for _ in range(self.n_server)
-                ]
-            )
-            
-    def _get_server_updates_and_scores(self, client_updates: torch.Tensor, selected_index: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """聚合服务器更新并计算它们的分数。"""
         server_updates = []
         for i in range(self.n_server):
             if i < self.m_server:
@@ -274,52 +275,100 @@ class Experiment:
             server_updates.append(update)
         server_updates = torch.stack(server_updates)
 
-        similarities = self.cos_sim_mat(server_updates, client_updates)
-        scores, _ = similarities.median(dim=1)
-        scores = scores.cpu().squeeze()
         
-        logger.info(f"Round scores: {scores}")
-        return server_updates, scores
+        return server_updates
+    
+    def _rescale_scores(self, scores: torch.Tensor) -> torch.Tensor:
+        """对单批次内的分数进行Min-Max缩放，使其分布在[0, 1]"""
+        min_val = torch.min(scores)
+        max_val = torch.max(scores)
+        
+        # 处理所有值都相同的边缘情况，避免除以零
+        if max_val == min_val:
+            # 可以返回全0.5或全0，取决于你的偏好
+            return torch.full_like(scores, 0.5) 
+        
+        return (scores - min_val) / (max_val - min_val)
+    
+    def _calc_scores(self, client_updates: torch.Tensor, server_updates: torch.Tensor):
+        """calculate 3 socres between client and server updates"""
+        
+        # similarity scores
+        cos_scores = self.cos_sim_mat(server_updates, client_updates)
+
+        # magnitude scores
+        server_norms = torch.norm(server_updates, p=2, dim=1).unsqueeze(1)
+        client_norms = torch.norm(client_updates, p=2, dim=1).unsqueeze(0)
+        mag_scores = 1 - torch.abs(client_norms - server_norms) / (client_norms + server_norms + 1e-9)
+        
+        # sign scores
+        # server_signs = self._get_sign_stats(server_updates).unsqueeze(1)
+        # client_signs = self._get_sign_stats(client_updates).unsqueeze(0)
+        # sgn_scores = 1 - torch.abs(client_signs - server_signs)
+        
+        cos_scores = self._rescale_scores(cos_scores)
+        mag_scores = self._rescale_scores(mag_scores)
+        # sgn_scores = self._rescale_scores(sgn_scores)
+        
+        all_scores = torch.stack([cos_scores, mag_scores])
+        median_scores, _ = all_scores.median(dim=2)
+        logger.info(f"Round scores: {median_scores}")
+        return median_scores.T.cpu()
     
     def _collect_regression_data(self, scores: torch.Tensor, selected_index: torch.Tensor):
         """
-        处理当前轮次的数据，并将其作为新的训练样本添加到多轮历史记录中。
-        使用EMA平滑的统计数据进行标准化，以保证跨轮次的可比性。
+        Identifies a set of trusted servers for the current round, and only adds
+        their participation data and standardized features to the history.
         """
-        # 1. 识别本轮的可信服务器集
-        _, sorted_indices = torch.sort(scores)
+        # probe_features is a (K, d) tensor
+        num_probes, num_dims = scores.shape
+
+        # --- 1. 计算临时的综合分数以识别可信服务器 ---
+        # 使用与 mozi_fl 中相同的权重来确保一致性
+        composite_scores = (scores * self.score_importances).sum(dim=1)
+
+        # --- 2. 识别本轮的可信服务器集 (您的原始逻辑) ---
+        # 根据综合分数进行排序
+        _, sorted_indices = torch.sort(composite_scores, descending=True)
+        
+        # 选择分数最高的 top 50% (或至少1个) 作为可信集
         num_trusted_servers = max(1, ceil(self.n_server / 2))
-        trusted_server_indices = sorted_indices[-num_trusted_servers:]
+        trusted_server_indices = sorted_indices[:num_trusted_servers]
+        
         logger.info(f"Trusted server set for data collection: {trusted_server_indices.tolist()}")
-
-        # 2. 计算本轮的临时统计数据
+        
         if trusted_server_indices.numel() == 0:
-            logger.warning("No trusted scores found, skipping data collection for this round.")
+            logger.warning("No trusted servers identified. Skipping data collection.")
             return
-            
-        current_mean = scores.mean().item()
-        current_std = scores.std().item()
-        stable_std = max(current_std, 1e-6)
+        
+        # 在这个“干净”的数据集上计算均值和标准差
+        mean = scores.mean(dim=0)
+        std = scores.std(dim=0).clamp(min=1e-6)
+        
+        # 标准化所有探针的特征，但使用可信集的统计数据作为基准
+        # 这样，即使是“坏”探针，其分数也会被转换到这个“好”的坐标系下
+        standardized_features = (scores - mean) / std
 
-
-        # 4. 为本轮的可信服务器创建标准化后的数据点
+        # --- 4. 为本轮的可信服务器创建并添加数据点 ---
         new_data_points = []
-        for i in trusted_server_indices:
+        # 只遍历可信服务器的索引
+        for k in trusted_server_indices:
             participation_vector = np.zeros(self.n_client)
-            selected_clients = selected_index[i]
+            selected_clients = selected_index[k]
             participation_vector[selected_clients.cpu().numpy()] = 1
             
-            raw_score = scores[i].item()
-            standardized_score = (raw_score - current_mean) / stable_std
-            logger.info(f'regression history add: {participation_vector.tolist()}, {standardized_score}')
-            new_data_points.append((participation_vector, standardized_score))
+            # 目标是标准化的多维特征向量
+            target_vector = standardized_features[k].cpu().numpy()
+            
+            new_data_points.append((participation_vector, target_vector))
+            logger.debug(f"Adding to history: P-Vec (sum={participation_vector.sum()}), Target={np.round(target_vector, 2)}")
 
-        # 5. 将本轮的新数据点追加到多轮历史记录中
+
+        # --- 5. 追加到历史记录并管理大小 (逻辑不变) ---
         self.history_for_regression.extend(new_data_points)
-
-        # 6. 管理历史数据大小
         if len(self.history_for_regression) > self.max_history_size:
             self.history_for_regression = self.history_for_regression[-self.max_history_size:]
+    
 
     def _update_credits_if_needed(self, r: int):
         """检查是否到达再训练周期，如果满足条件，则触发信誉模型的再训练。"""
@@ -335,42 +384,44 @@ class Experiment:
             f"Benign: {benign_avg_credit:.4f}, Mal: {malicious_avg_credit:.4f}"
         )
     
+    @staticmethod
+    def _get_sign_stats(tensor: torch.Tensor) -> torch.Tensor:
+        """Calculates the sign statistics (non-negative counts) for a tensor."""
+        return (tensor >= 0).float().sum(dim=1) / tensor.shape[1]
+    
     def update_credit_with_regression(self):
         """
-        使用历史数据和样本权重训练回归模型，并用EMA更新客户端信誉。
+        Uses historical data to train a multi-target regression model and updates client credits.
         """
-        if not self.history_for_regression:
-            logger.warning("Regression history is empty. Skipping credit update.")
+        if not self.history_for_regression or len(self.history_for_regression) < self.n_client:
+            logger.warning("Not enough history for regression. Skipping credit update.")
             return
 
-        # 准备训练数据
-        X_train = np.array([item[0] for item in self.history_for_regression])
-        y_train = np.array([item[1] for item in self.history_for_regression])
-        
-        # --- 方案一：创建样本权重 ---
-        # 使用标准化得分的绝对值作为样本权重。
-        # 得分越偏离平均值（无论是极好还是极坏），该样本在训练中的重要性就越高。
-        # 加上一个很小的常数，以确保即使得分为0的样本也有一定的权重。
-        sample_weights = np.abs(y_train) + 0.1
-        # --- 修改结束 ---
+        # 1. 准备训练数据
+        X_train = np.array([item[0] for item in self.history_for_regression]) # Shape: (T_history, N)
+        y_train = np.array([item[1] for item in self.history_for_regression]) # Shape: (T_history, d)
 
+        # 检查y_train中是否有NaN值 (可能由std=0导致)
+        if np.isnan(y_train).any():
+            logger.warning("NaNs found in y_train, filling with 0.")
+            y_train = np.nan_to_num(y_train)
+            
+        sample_importance = np.linalg.norm(y_train, axis=1) + 0.1
         try:
-            # --- 方案一：将样本权重传递给 .fit() 方法 ---
-            self.credit_model.fit(X_train, y_train, sample_weight=sample_weights)
+
+            # scikit-learn's Ridge seamlessly handles a 2D y_train
+            self.credit_model.fit(X_train, y_train, sample_weight=sample_importance)
             
-            # 获取模型权重作为新的信誉分数
-            new_credits = torch.from_numpy(self.credit_model.coef_).float()
-            print(new_credits)
-            # 使用EMA平滑更新，这是实现“逐步”边缘化的关键
-            self.credit = self.ema_decay * self.credit.cpu() + \
-                          (1 - self.ema_decay) * new_credits
-            
-            # 不使用EMA
-            # self.credit = new_credits
+
+            # model.coef_ shape will be (d, N), so we transpose it
+            new_credits_matrix = torch.from_numpy(self.credit_model.coef_.T).float() # Shape: (N, d)
+            # 简单求和即可，因为岭回归的系数已经反映了每个特征的重要性
+            new_credits_vector = new_credits_matrix.sum(dim=1) # Shape: (N,)
+            self.credit = new_credits_vector
                           
-            logger.success("Credit model retrained and credits updated successfully.")
+            logger.success("Multi-target credit model retrained. Credits updated.")
+            logger.info(f"Learned credit matrix (sample for first 5 clients):\n{new_credits_matrix[:5]}")
 
         except Exception as e:
             logger.error(f"Failed to train credit model: {e}")
-            # 可以在这里加入调试信息，例如打印 X_train.shape, y_train.shape
             logger.error(f"Data shapes: X_train={X_train.shape}, y_train={y_train.shape}")

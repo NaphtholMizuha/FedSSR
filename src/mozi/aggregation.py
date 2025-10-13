@@ -1,5 +1,7 @@
 import torch
 from torch import Tensor
+from sklearn.mixture import GaussianMixture
+import numpy as np
 from loguru import logger
 def aggregate(grads: Tensor, method: str, **kwargs) -> Tensor:
     """Aggregate multiple gradients
@@ -25,6 +27,8 @@ def aggregate(grads: Tensor, method: str, **kwargs) -> Tensor:
             return collude(grads, **kwargs)
         case 'random':
             return random(grads)
+        case "gmm":
+            return gmm_md(grads)
         case _:
             raise ValueError(f"Aggregation Method Not Found: {method}")
 
@@ -103,3 +107,70 @@ def random(grads: Tensor) -> Tensor:
         Random gradient with the same shape as input
     """
     return torch.rand_like(grads[0])
+
+def gmm_md(
+    grads: torch.Tensor,
+    n_components: int = 2,
+    threshold_factor: float = 2.0,
+    verbose: bool = True,
+):
+    num_users, grad_dim = grads.shape
+    
+    if num_users < n_components:
+        if verbose:
+            print(f"Warning: Number of users ({num_users}) is less than GMM components ({n_components}). Aggregating all gradients.")
+        return torch.mean(grads, dim=0)
+
+    grads_np = grads.cpu().numpy()
+    
+    gmm = GaussianMixture(n_components=n_components, covariance_type='diag', random_state=42)
+    gmm.fit(grads_np)
+    
+    benign_idx = np.argmax(gmm.weights_)
+    if verbose:
+        print(f"Benign cluster identified as index: {benign_idx} (Weight: {gmm.weights_[benign_idx]:.2f})")
+        
+    labels = gmm.predict(grads_np)
+    mahalanobis_dists = np.zeros(num_users)
+    
+    for k in range(n_components):
+        indices = np.where(labels == k)[0]
+        if len(indices) == 0:
+            continue
+        
+        diff = grads_np[indices,:] - gmm.means_[k]
+        sq_dists = np.sum(diff**2 * gmm.precisions_[k], axis=1)
+        mahalanobis_dists[indices] = np.sqrt(sq_dists)
+        
+    dists_in_benign_cluster = mahalanobis_dists[labels == benign_idx]
+    
+    if len(dists_in_benign_cluster) == 0:
+        if verbose:
+            print("Warning: Benign cluster is empty. Cannot determine threshold. Returning zero vector.")
+        return torch.zeros(grad_dim, device=grads.device, dtype=grads.dtype)
+    
+    mean_md = np.mean(dists_in_benign_cluster)
+    std_md = np.std(dists_in_benign_cluster)
+    threshold = mean_md + threshold_factor * std_md
+    if verbose:
+        print(f"Calculated dynamic threshold T = {threshold:.4f} (Mean MD: {mean_md:.4f}, Std MD: {std_md:.4f})")
+
+    # --- 5. 确定良性梯度的索引 ---
+    benign_mask = (labels == benign_idx) & (mahalanobis_dists < threshold)
+    benign_indices = np.where(benign_mask)[0]
+    
+    num_benign = len(benign_indices)
+    
+    if verbose:
+        print(f"Audit complete. Found {num_benign} benign gradients, filtered out {num_users - num_benign}.")
+
+    # --- 6. 聚合良性梯度 ---
+    if num_benign > 0:
+        benign_gradients = grads[benign_indices]
+        aggregated_gradient = torch.mean(benign_gradients, dim=0)
+    else:
+        if verbose:
+            print("Warning: All gradients were filtered out. Returning a zero vector.")
+        aggregated_gradient = torch.zeros(grad_dim, device=grads.device, dtype=grads.dtype)
+
+    return aggregated_gradient
