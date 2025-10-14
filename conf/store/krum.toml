@@ -14,7 +14,7 @@ n_round = 250
 # training
 n_epoch = 3
 learning_rate = 1e-3
-device = 'cuda:1'
+device = 'cuda:0'
 datapath = '/data'
 batch_size = 32
 num_workers = 2

@@ -12,11 +12,11 @@ import os
 from sklearn.linear_model import Ridge
 from math import ceil
 import numpy as np
-from scipy.stats import kurtosis
+from scipy import stats
 
-TEMPERATURE = 0.1
+TEMPERATURE = 0.05
 IMPORTANCE_TEMPERATURE = 0.1
-NUM_SCORES = 2
+NUM_SCORES = 3
 
 
 @dataclass
@@ -74,6 +74,7 @@ class Experiment:
         self.retrain_interval = 2
         self.score_importances = torch.ones(NUM_SCORES) / NUM_SCORES
         self.prev_winner = 1
+        self.sampling_dim = 1000
         # 定义结果文件的路径
         self.log_dir = "log"  # 可以自定义日志目录
         os.makedirs(self.log_dir, exist_ok=True)  # 确保目录存在
@@ -95,10 +96,6 @@ class Experiment:
         Y_norm = F.normalize(Y, dim=1)
         return X_norm.matmul(Y_norm.T)
 
-    @staticmethod
-    def _calc_kurtosis(x: torch.Tensor):
-        x_np = x.cpu().numpy()
-        return torch.from_numpy(kurtosis(x_np, axis=1, fisher=False)).to(x.device)
 
     def reset(self, config: ExperimentConfig):
         init_model = fetch_model(config.model)
@@ -214,7 +211,9 @@ class Experiment:
         selected_index = self._select_clients(
             num_selected=int(self.frac * self.n_client), temperature=0.3
         )
-        logger.info(f"Round {r}: Server Selection:\n {selected_index}.")
+        
+        mali = torch.sum(selected_index < self.m_client, dim=1)
+        logger.info(f"Round {r}: Server Selection:\n {mali}.")
 
         # aggregate and score
         server_updates = self._get_server_updates(client_updates, selected_index)
@@ -288,6 +287,19 @@ class Experiment:
             return torch.full_like(scores, 0.5)
 
         return (scores - min_val) / (max_val - min_val)
+    
+    @staticmethod
+    def _calc_chunk_scores(
+        x: torch.Tensor,
+        y: torch.Tensor,
+    ):
+        def _get_chunk_stds(x: torch.Tensor, n_chunks: int = 1000):
+            chunks = torch.chunk(x, chunks=n_chunks, dim=1)
+            stds_list = [torch.std(c, dim=1, unbiased=True) for c in chunks]
+            return torch.stack(stds_list, dim=1)
+        local_stds, probe_stds = _get_chunk_stds(x), _get_chunk_stds(y)        
+        return Experiment.cos_sim_mat(local_stds, probe_stds)
+
 
     def _calc_scores(self, client_updates: torch.Tensor, server_updates: torch.Tensor):
         """calculate 3 socres between client and server updates"""
@@ -296,24 +308,29 @@ class Experiment:
         cos_scores = self.cos_sim_mat(server_updates, client_updates)
 
         # magnitude scores
-        server_norms = torch.norm(server_updates, p=2, dim=1).unsqueeze(1)
-        client_norms = torch.norm(client_updates, p=2, dim=1).unsqueeze(0)
-        mag_scores = 1 - torch.abs(client_norms - server_norms) / (
-            client_norms + server_norms + 1e-9
-        )
+        # server_norms = torch.norm(server_updates, p=2, dim=1).unsqueeze(1)
+        # client_norms = torch.norm(client_updates, p=2, dim=1).unsqueeze(0)
+        # mag_scores = 1 - torch.abs(client_norms - server_norms) / (
+        #     client_norms + server_norms + 1e-9
+        # )
+        
+        server_signs = self._get_sign_stats(server_updates).unsqueeze(1)
+        client_signs = self._get_sign_stats(client_updates).unsqueeze(0)
+        sgn_scores = 1 - torch.abs(client_signs - server_signs)
 
-        # sign scores
-        # server_signs = self._get_sign_stats(server_updates).unsqueeze(1)
-        # client_signs = self._get_sign_stats(client_updates).unsqueeze(0)
-        # sgn_scores = 1 - torch.abs(client_signs - server_signs)
-
+        chunk_scores = self._calc_chunk_scores(server_updates, client_updates)
+          
         cos_scores = self._rescale_scores(cos_scores)
-        mag_scores = self._rescale_scores(mag_scores)
+        # mag_scores = self._rescale_scores(mag_scores)
+        sgn_scores = self._rescale_scores(sgn_scores)
+        chunk_scores = self._rescale_scores(chunk_scores)
 
-        all_scores = torch.stack([cos_scores, mag_scores])
-        median_scores, _ = all_scores.median(dim=2)
-        logger.info(f"Round scores: {median_scores}")
-        return median_scores.T.cpu()
+
+        all_scores = torch.stack([cos_scores, sgn_scores, chunk_scores])
+        # logger.info(f"Row scores:\n{all_scores}")
+        final_scores, _ = all_scores.median(dim=2)
+        logger.info(f"Round scores: {final_scores}")
+        return final_scores.T.cpu()
 
     def _collect_regression_data(
         self, scores: torch.Tensor, selected_index: torch.Tensor
@@ -356,7 +373,8 @@ class Experiment:
         # --- 4. 为本轮的可信服务器创建并添加数据点 ---
         new_data_points = []
         # 只遍历可信服务器的索引
-        for k in trusted_server_indices:
+        # for k in trusted_server_indices:
+        for k in range(self.n_server):
             participation_vector = np.zeros(self.n_client)
             selected_clients = selected_index[k]
             participation_vector[selected_clients.cpu().numpy()] = 1
@@ -396,6 +414,10 @@ class Experiment:
     def _get_sign_stats(tensor: torch.Tensor) -> torch.Tensor:
         """Calculates the sign statistics (non-negative counts) for a tensor."""
         return (tensor >= 0).float().sum(dim=1) / tensor.shape[1]
+    
+    @staticmethod
+    def _calc_zero_ratio(x: torch.Tensor, thr=1e-8):
+        return (torch.abs(x) < thr).float().sum(dim=1) / x.shape[1]
 
     def update_credit_with_regression(self):
         """

@@ -1,5 +1,5 @@
 from torch.utils.data import Dataset
-from .cifar import get_cifar10
+from .cifar import get_cifar10, get_cifar100
 from .imagenette import get_imagenette, get_imagewoof
 from .fmnist import get_fmnist
 from .food101 import get_food101
@@ -7,6 +7,8 @@ from .food101 import get_food101
 def fetch_dataset(path: str, dataset: str) -> tuple[Dataset, Dataset]:
     if dataset == 'cifar10':
         return get_cifar10(path, True), get_cifar10(path, False)
+    elif dataset == 'cifar100':
+        return get_cifar100(path, True), get_cifar100(path, False)
     elif dataset == 'imagenette':
         return get_imagenette(path, True), get_imagenette(path, False)
     elif dataset == 'imagewoof':

@@ -88,24 +88,65 @@ def min_max_sum(
     return grads
 
 def scale_sign_attack(
-    grads: torch.Tensor, m: int, crit: str = "max"
+    grads: torch.Tensor, 
+    m: int, 
+    crit: str = "max",
+    k: int | None = 1000
 ) -> torch.Tensor:
-    """Implement ScaleSign attack strategy (refactored)."""
+    """
+    实现 ScaleSign 攻击策略。
+    现在支持均匀缩放和坐标级缩放。
+
+    Args:
+        grads (torch.Tensor): 所有参与方的梯度张量。
+        m (int): 恶意参与方的数量。
+        crit (str): 判定标准，'max' 或 'sum'。
+        k (Optional[int]): 要进行坐标级缩放的坐标数量。
+                           如果为 None 或 0，则执行均匀缩放 (旧行为)。
+                           如果为正数，则选择绝对值最大的k个坐标进行缩放。
+
+    Returns:
+        torch.Tensor: 包含恶意梯度的新梯度张量。
+    """
     honest_grads = grads[m:]
     avg = honest_grads.mean(dim=0)
+    d = avg.numel() # 获取梯度维度
     
-    # Define how to generate a malicious gradient from a gamma factor
-    def mal_generator(gamma: float) -> torch.Tensor:
-        return gamma * avg
-    # Find the optimal factor using the reusable helper function
+    # --- 根据 k 的值决定缩放策略 ---
+    if k is not None and k > 0:
+        # --- 坐标级缩放 (Coordinate-wise Scaling) ---
+        print(f"执行坐标级缩放，k = {k}")
+        
+        # 1. 确定坐标集 Θ₁ 和 Θ₂
+        # 策略：选择平均梯度中绝对值最大的 k 个坐标
+        abs_avg = avg.abs()
+        _, top_k_indices = torch.topk(abs_avg, min(k, d)) # 防止 k > d
+        
+        # 将前一半作为 Θ₁ (放大)，后一半作为 Θ₂ (缩小)
+        split_idx = len(top_k_indices) // 2
+        theta1 = top_k_indices[:split_idx]
+        theta2 = top_k_indices[split_idx:]
+        
+        # 2. 定义坐标级缩放的恶意梯度生成器
+        def mal_generator(gamma: float) -> torch.Tensor:
+            scaling_vector = _generate_scaling_vector(d, theta1, theta2, gamma, avg.device, avg.dtype)
+            return scaling_vector * avg # 元素级乘法
+    else:
+        # --- 均匀缩放 (Uniform Scaling)，保持旧行为 ---
+        print("执行均匀缩放")
+        def mal_generator(gamma: float) -> torch.Tensor:
+            return gamma * avg
+
+    # 找到最优的缩放因子 gamma
     best_gamma = _find_optimal_factor(honest_grads, crit, mal_generator)
     print(f"Optimal γ for Scaling Attack = {best_gamma:.4f}")
     
+    # 生成最优的恶意梯度
     scaled_mal_grad = mal_generator(best_gamma)
     
-    # Sign Modification step
+    # 符号修改步骤
     if len(honest_grads) > 0:
-        ref_grad = honest_grads[0] # Using the first honest as reference
+        ref_grad = honest_grads[0] # 使用第一个良性梯度作为参考
         final_mal_grad = _modify_signs(scaled_mal_grad, ref_grad)
     else:
         final_mal_grad = scaled_mal_grad
@@ -113,6 +154,43 @@ def scale_sign_attack(
     grads[:m] = final_mal_grad
     return grads
 
+def _generate_scaling_vector(
+    d: int, 
+    theta1: torch.Tensor, 
+    theta2: torch.Tensor, 
+    gamma: float,
+    device: torch.device,
+    dtype: torch.dtype
+) -> torch.Tensor:
+    """
+    根据算法1生成一个缩放向量 (Scaling Vector)。
+    这个向量等效于对角矩阵 Φ 的对角线。
+
+    Args:
+        d (int): 梯度向量的维度。
+        theta1 (torch.Tensor): 坐标集 Θ₁, 将被乘以 gamma。
+        theta2 (torch.Tensor): 坐标集 Θ₂, 将被乘以 1/gamma。
+        gamma (float): 缩放系数。
+        device: a torch.device object.
+        dtype: a torch.dtype object.
+        
+    Returns:
+        torch.Tensor: 一个1-D的缩放向量。
+    """
+    # 1. 初始化一个全为1的向量，相当于单位矩阵的对角线。
+    scaling_vector = torch.ones(d, device=device, dtype=dtype)
+    
+    # 避免 gamma 为 0 导致除零错误
+    if gamma == 0.0:
+        gamma = 1e-9 # 用一个极小值代替
+
+    # 2. 对 Θ₁ 中的坐标应用缩放因子 γ
+    scaling_vector[theta1] = gamma
+    
+    # 3. 对 Θ₂ 中的坐标应用缩放因子 1/γ
+    scaling_vector[theta2] = 1.0 / gamma
+    
+    return scaling_vector
 
 def _find_optimal_factor(
     grads: torch.Tensor,

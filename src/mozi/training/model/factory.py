@@ -7,7 +7,7 @@ def fetch_model(name: str, **kwargs):
     elif name == "cnn-gray":
         return CnnGray(**kwargs)
     elif name == "resnet":
-        return resnet18(num_classes=10, **kwargs)
+        return resnet18(num_classes=100, **kwargs)
     elif name == "shufflenet":
         return shufflenet_v2_x1_0(num_classes=10, **kwargs)
     elif name == "vit":
