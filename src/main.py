@@ -2,7 +2,8 @@ from .mozi.experiment import Experiment, ExperimentConfig
 import toml
 from loguru import logger
 import typer
-from typing import Annotated, Optional
+from typing import Annotated, Optional, List
+import os
 
 app = typer.Typer()
 
@@ -34,7 +35,8 @@ def main(
     attack: Annotated[Optional[str], typer.Option(help="Attack type")] = None,
     aggregation: Annotated[Optional[str], typer.Option(help="Aggregation method")] = None,
     selection_fraction: Annotated[Optional[float], typer.Option(help="Selection fraction")] = None,
-    method: Annotated[Optional[str], typer.Option(help="Method (stateful/stateless/baseline)")] = None,
+    method: Annotated[Optional[str], typer.Option(help="Method (ours/baseline)")] = None,
+    score_types: Annotated[Optional[List[str]], typer.Option(help="List of score types to use")] = None,
 ):
     """
     Run the FedMozi experiment with optional parameter overrides.
@@ -42,6 +44,15 @@ def main(
     # Load config from file
     config_data = toml.load(config)
     exp_name = config.split('/')[-1].replace('.toml', '')
+
+    # setup logger
+    log_dir = "log"
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"{exp_name}.log")
+    
+    logger.remove()
+    logger.add(lambda msg: typer.echo(msg, err=True), colorize=True, level="DEBUG")
+    logger.add(log_file, level="DEBUG", format="{time} {level} {message}", rotation="10 MB")
     
     # Override config with command line arguments if provided
     # task
@@ -89,6 +100,8 @@ def main(
         config_data['selection_fraction'] = selection_fraction
     if method is not None:
         config_data['method'] = method
+    if score_types is not None:
+        config_data['score_types'] = score_types
     
     config_obj = ExperimentConfig(exp_name=exp_name, **config_data)
     logger.info(config_obj)

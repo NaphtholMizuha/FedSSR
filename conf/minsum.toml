@@ -1,6 +1,6 @@
 # task
-model = 'resnet'
-dataset = 'cifar100'
+model = 'shufflenet'
+dataset = 'cifar10'
 split = 'iid'
 dir_alpha = nan
 
@@ -12,7 +12,7 @@ m_server = 0
 n_round = 250
 
 # training
-n_epoch = 3
+n_epoch = 5
 learning_rate = 1e-3
 device = 'cuda:1'
 datapath = '/data'
@@ -20,7 +20,8 @@ batch_size = 32
 num_workers = 2
 
 # security
-attack = 'ascent'
+attack = 'min-sum-std'
 aggregation = 'fedavg'
-selection_fraction = 0.33
-method = 'stateful'
+selection_fraction = 0.5
+method = 'ours'
+score_types = ['cos', 'sgn', 'dist']

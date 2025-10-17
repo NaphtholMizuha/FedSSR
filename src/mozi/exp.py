@@ -14,7 +14,7 @@ from math import ceil
 import numpy as np
 from scipy import stats
 
-TEMPERATURE = 0.05
+MIN_TEMPERATURE = 0.05
 IMPORTANCE_TEMPERATURE = 0.1
 NUM_SCORES = 3
 
@@ -147,9 +147,7 @@ class Experiment:
 
     def run(self):
         for r in range(self.n_round):
-            if self.method == "stateless":
-                loss, acc = self.mozi_fl(r, stateful=False)
-            elif self.method == "stateful":
+            if self.method == "stateful":
                 loss, acc = self.mozi_fl(r, stateful=True)
             else:
                 loss, acc = self.classic_fl(r)
@@ -244,9 +242,6 @@ class Experiment:
     ) -> torch.Tensor:
         """
         为每个服务器选择客户端。
-        对于 prev_winner，使用 softmax 概率采样。
-        对于其他服务器，使用随机采样。
-
         Args:
             num_selected (int): 要选择的客户端数量。
             temperature (float): Softmax 的温度参数。
@@ -254,11 +249,11 @@ class Experiment:
         return torch.stack(
             [
                 torch.multinomial(
-                    torch.softmax(self.credit, dim=0).cpu() / temperature,
+                    torch.softmax(self.credit, dim=0).cpu() / (temperature * 5**i),
                     num_samples=num_selected,
                     replacement=False,
                 )
-                for _ in range(self.n_server)
+                for i in range(self.n_server)
             ]
         )
 

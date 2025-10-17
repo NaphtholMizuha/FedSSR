@@ -23,4 +23,4 @@ num_workers = 2
 attack = 'min-max-uv'
 aggregation = 'fedavg'
 selection_fraction = 0.33
-method = 'stateful'
+method = 'ours'
