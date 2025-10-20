@@ -101,9 +101,6 @@ def scale_sign_attack(
         grads (torch.Tensor): 所有参与方的梯度张量。
         m (int): 恶意参与方的数量。
         crit (str): 判定标准，'max' 或 'sum'。
-        k (Optional[int]): 要进行坐标级缩放的坐标数量。
-                           如果为 None 或 0，则执行均匀缩放 (旧行为)。
-                           如果为正数，则选择绝对值最大的k个坐标进行缩放。
 
     Returns:
         torch.Tensor: 包含恶意梯度的新梯度张量。
@@ -112,30 +109,18 @@ def scale_sign_attack(
     avg = honest_grads.mean(dim=0)
     d = avg.numel() # 获取梯度维度
     
-    # --- 根据 k 的值决定缩放策略 ---
-    if k is not None and k > 0:
-        # --- 坐标级缩放 (Coordinate-wise Scaling) ---
-        print(f"执行坐标级缩放，k = {k}")
-        
-        # 1. 确定坐标集 Θ₁ 和 Θ₂
-        # 策略：选择平均梯度中绝对值最大的 k 个坐标
-        abs_avg = avg.abs()
-        _, top_k_indices = torch.topk(abs_avg, min(k, d)) # 防止 k > d
-        
-        # 将前一半作为 Θ₁ (放大)，后一半作为 Θ₂ (缩小)
-        split_idx = len(top_k_indices) // 2
-        theta1 = top_k_indices[:split_idx]
-        theta2 = top_k_indices[split_idx:]
-        
-        # 2. 定义坐标级缩放的恶意梯度生成器
-        def mal_generator(gamma: float) -> torch.Tensor:
-            scaling_vector = _generate_scaling_vector(d, theta1, theta2, gamma, avg.device, avg.dtype)
-            return scaling_vector * avg # 元素级乘法
-    else:
-        # --- 均匀缩放 (Uniform Scaling)，保持旧行为 ---
-        print("执行均匀缩放")
-        def mal_generator(gamma: float) -> torch.Tensor:
-            return gamma * avg
+
+    # 1. 确定坐标集 Θ₁ 和 Θ₂
+    # 策略：随机对半划分所有下标
+    indices = torch.randperm(d, device=avg.device)
+    split_idx = d // 2
+    theta1 = indices[:split_idx]
+    theta2 = indices[split_idx:]
+    
+    # 2. 定义坐标级缩放的恶意梯度生成器
+    def mal_generator(gamma: float) -> torch.Tensor:
+        scaling_vector = _generate_scaling_vector(d, theta1, theta2, gamma, avg.device, avg.dtype)
+        return scaling_vector * avg # 元素级乘法
 
     # 找到最优的缩放因子 gamma
     best_gamma = _find_optimal_factor(honest_grads, crit, mal_generator)

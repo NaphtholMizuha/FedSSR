@@ -1,6 +1,6 @@
 from ..training import Trainer, fetch_dataset, fetch_datasplitter, fetch_model
 from .classic import ClassicFLHandler
-from .mozi import MoziFLHandler
+from .fedssr import FedSSRHandler
 from dataclasses import dataclass
 from loguru import logger
 from typing import Literal, List
@@ -78,7 +78,7 @@ class Experiment:
         if config.method == "baseline":
             self.handler = ClassicFLHandler(self)
         elif config.method == "ours":
-            self.handler = MoziFLHandler(self)
+            self.handler = FedSSRHandler(self)
         else:
             raise ValueError(f"Unknown method: {config.method}")
 

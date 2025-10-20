@@ -15,7 +15,7 @@ IMPORTANCE_TEMPERATURE = 0.1
 NUM_SCORES = 3
 
 
-class MoziFLHandler:
+class FedSSRHandler:
     def __init__(self, experiment: "Experiment"):
         """
         Initializes the handler for the MoziFL experiment.
