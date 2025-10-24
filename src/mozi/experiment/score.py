@@ -119,7 +119,7 @@ def calculate_scores(
     score_types: list[str] | None = None,
 ) -> torch.Tensor:
     """
-    Calculates a single-dimensional score for each server by averaging multiple score types.
+    Calculates a multi-dimensional score for each server.
 
     Args:
         client_updates (torch.Tensor): Updates from all clients.
@@ -127,7 +127,7 @@ def calculate_scores(
         score_types (list[str], optional): A list of score types to calculate. Defaults to all.
 
     Returns:
-        torch.Tensor: A 1D tensor of final scores for each server.
+        torch.Tensor: A 2D tensor of final scores (m x k) for each server.
     """
     if score_types is None:
         score_types = ["cos", "sgn", "dist"]
@@ -173,7 +173,7 @@ def calculate_scores(
         logger.warning(
             "No valid score types provided, returning zero scores for all servers."
         )
-        return torch.zeros(server_updates.shape[0])
+        return torch.zeros(server_updates.shape[0], len(score_types) or 1)
 
     # 1. First aggregation: Take the median per client to get server scores.
     server_scores_per_type = [s.median(dim=1).values for s in raw_scores_list]
@@ -188,6 +188,4 @@ def calculate_scores(
     log_message = f"Final scores matrix (m x k) with types: {calculated_score_names}\n{final_scores_matrix}"
     logger.info(log_message)
 
-    final_scores = final_scores_matrix.mean(dim=1)
-
-    return final_scores.cpu()
+    return final_scores_matrix.cpu()

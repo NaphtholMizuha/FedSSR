@@ -103,6 +103,7 @@ class Experiment:
                 nw=config.num_workers,
                 lr=config.learning_rate,
                 device=config.device,
+                total_epoch=config.n_epoch*config.n_round,
             )
             for i in range(config.n_client)
         ]

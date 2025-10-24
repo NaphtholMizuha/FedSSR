@@ -1,5 +1,7 @@
 import torch
 from loguru import logger
+from sklearn.cluster import KMeans
+import numpy as np
 from ..aggregation import aggregate
 from ..attack import attack
 from typing import TYPE_CHECKING
@@ -29,7 +31,7 @@ class FedSSRHandler:
         self.regressor = CreditRegressor(n_client=self.exp.n_client)
 
         # MoziFL specific state
-        self.credit = torch.zeros(self.exp.n_client)
+        self.credit = torch.zeros((self.exp.n_client, NUM_SCORES))
         self.prev_winner = 1
         self.sampling_dim = 1000
 
@@ -55,27 +57,25 @@ class FedSSRHandler:
             client_updates, self.exp.attack, self.exp.m_client, self.exp.n_client
         )
 
-        # New logic: aggregate top frac% clients based on credit for the global update
-        num_top_clients = int(self.exp.n_client * self.exp.frac)
-        if num_top_clients == 0:
-            num_top_clients = 1  # Fallback to 1 client if frac is too small
+        trusted_client_indices = self._get_trusted_clients()
 
-        _, top_client_indices = torch.topk(self.credit, num_top_clients)
+        global_update = aggregate(client_updates[trusted_client_indices], "fedavg")
 
-        global_update = aggregate(client_updates[top_client_indices], "fedavg")
-
-        num_mali_in_top = (top_client_indices < self.exp.m_client).sum().item()
+        num_mali_in_trusted = (trusted_client_indices < self.exp.m_client).sum().item()
         logger.info(
-            f"Round {r}: Aggregating top {num_top_clients} clients ({self.exp.frac * 100:.1f}%) with highest credit for global update. "
-            f"{num_mali_in_top} are malicious."
+            f"Round {r}: Aggregating {len(trusted_client_indices)} clients from the larger cluster. "
+            f"{num_mali_in_trusted} are malicious."
         )
 
         # The rest is for credit model training.
         # It requires frac > 0 for client selection.
         if self.exp.frac > 0:
             # select client sbubsets for credit model training
+            num_selected = int(self.exp.frac * self.exp.n_client)
+            if num_selected == 0:
+                num_selected = 1
             selected_index = self._select_clients(
-                num_selected=int(self.exp.frac * self.exp.n_client)
+                num_selected=num_selected
             )
 
             mali = torch.sum(selected_index < self.exp.m_client, dim=1)
@@ -87,7 +87,7 @@ class FedSSRHandler:
             scores = score.calculate_scores(
                 client_updates, server_updates, self.exp.score_types
             )
-            logger.debug(f"Round scores: {scores}")
+            logger.debug(f"Round scores shape: {scores.shape}")
 
             self.regressor.collect_data(scores, selected_index, self.exp.n_server)
 
@@ -99,7 +99,6 @@ class FedSSRHandler:
 
             self._log_credit_stats()
 
-            
         for client in self.exp.clients:
             client.set_grad(global_update)
 
@@ -107,6 +106,25 @@ class FedSSRHandler:
         loss, acc = self.exp.clients[-1].test()
         logger.success(f"Round {r}: Loss: {loss:.4f}, Acc: {acc * 100:.2f}!")
         return loss, acc
+
+    def _get_trusted_clients(self) -> torch.Tensor:
+        """
+        Selects trusted clients using k-means clustering on credit scores.
+
+        Returns:
+            torch.Tensor: Indices of clients in the larger cluster.
+        """
+        kmeans = KMeans(n_clusters=2, random_state=0, n_init='auto').fit(self.credit.cpu().numpy())
+        labels = kmeans.labels_
+
+        # Find the larger cluster
+        cluster_0_indices = np.where(labels == 0)[0]
+        cluster_1_indices = np.where(labels == 1)[0]
+
+        if len(cluster_0_indices) > len(cluster_1_indices):
+            return torch.from_numpy(cluster_0_indices)
+        else:
+            return torch.from_numpy(cluster_1_indices)
 
     def _select_clients(self, num_selected: int) -> torch.Tensor:
         """
@@ -151,6 +169,10 @@ class FedSSRHandler:
         """
         Logs the average credit for benign and malicious clients.
         """
-        benign_avg_credit = self.credit[self.exp.m_client :].mean()
-        malicious_avg_credit = self.credit[: self.exp.m_client].mean()
-        logger.debug(f"Benign: {benign_avg_credit:.4f}, Mal: {malicious_avg_credit:.4f}")
+        if self.exp.m_client > 0:
+            malicious_avg_credit = self.credit[: self.exp.m_client].mean(dim=0)
+            logger.debug(f"Malicious avg credit: {malicious_avg_credit.cpu().numpy()}")
+        if self.exp.m_client < self.exp.n_client:
+            benign_avg_credit = self.credit[self.exp.m_client :].mean(dim=0)
+            logger.debug(f"Benign avg credit: {benign_avg_credit.cpu().numpy()}")
+
