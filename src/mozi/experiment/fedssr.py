@@ -84,10 +84,18 @@ class FedSSRHandler:
             # aggregate and score
             server_updates = self._get_server_updates(client_updates, selected_index)
 
-            scores = score.calculate_scores(
-                client_updates, server_updates, self.exp.score_types
-            )
-            logger.debug(f"Round scores shape: {scores.shape}")
+            reference = self.exp.root
+            if reference is not None:
+                reference.local_train(self.exp.n_epoch)
+                clean_update = reference.get_grad()
+                scores = score.calculate_scores(
+                    clean_update, server_updates, self.exp.score_types
+                )
+            else:
+                scores = score.calculate_scores(
+                    client_updates, server_updates, self.exp.score_types
+                )
+            logger.debug(f"Round scores: {scores}")
 
             self.regressor.collect_data(scores, selected_index, self.exp.n_server)
 
@@ -101,6 +109,9 @@ class FedSSRHandler:
 
         for client in self.exp.clients:
             client.set_grad(global_update)
+            
+        if reference is not None:
+            reference.set_grad(global_update)
 
         # test and log
         loss, acc = self.exp.clients[-1].test()

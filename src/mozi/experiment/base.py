@@ -1,10 +1,13 @@
 from ..training import Trainer, fetch_dataset, fetch_datasplitter, fetch_model
 from .classic import ClassicFLHandler
 from .fedssr import FedSSRHandler
+from .bsrfl import BSRFLHandler
+from .rflpa import RFLPAHandler
 from dataclasses import dataclass
 from loguru import logger
 from typing import Literal, List
 import polars as pl
+from torch.utils.data import random_split, Subset
 from datetime import datetime
 import os
 
@@ -31,7 +34,8 @@ class ExperimentConfig:
     selection_fraction: float
     method: Literal["ours", "baseline"]
     dir_alpha: float | None = None
-    score_types: List[str] | None = None
+    score_types: list[str] | None = None
+    clean_data: bool = False
 
 
 class Experiment:
@@ -44,9 +48,15 @@ class Experiment:
         """
         train_set, self.test_set = fetch_dataset(config.datapath, config.dataset)
 
-        self.train_subsets = fetch_datasplitter(
-            train_set, config.split, config.n_client, alpha=config.dir_alpha
+ 
+        if len(train_set) < config.clean_data:
+            raise ValueError("Train set has less than 100 samples, cannot create clean_set.")
+            
+            
+        self.root_subset, self.train_subsets = fetch_datasplitter(
+            train_set, config.split, config.n_client, config.clean_data, alpha=config.dir_alpha
         ).split()
+
 
         self.n_epoch = config.n_epoch
         self.n_round = config.n_round
@@ -79,6 +89,10 @@ class Experiment:
             self.handler = ClassicFLHandler(self)
         elif config.method == "ours":
             self.handler = FedSSRHandler(self)
+        elif config.method == "bsrfl":
+            self.handler = BSRFLHandler(self)
+        elif config.method == "rflpa":
+            self.handler = RFLPAHandler(self)
         else:
             raise ValueError(f"Unknown method: {config.method}")
 
@@ -107,6 +121,19 @@ class Experiment:
             )
             for i in range(config.n_client)
         ]
+        
+        if config.clean_data != 0:
+            self.root = Trainer(
+                model=fetch_model(config.model).to(config.device),
+                init_state=init_model.state_dict(),
+                train_set=self.root_subset,
+                test_set=self.test_set,
+                bs=config.batch_size,
+                nw=config.num_workers,
+                lr=config.learning_rate,
+                device=config.device,
+                total_epoch=config.n_epoch*config.n_round,
+            )
 
     def save_results(self, result: dict):
         """

@@ -31,8 +31,8 @@ class Trainer:
         )
         self.test_loader = DataLoader(test_set, batch_size=bs, num_workers=nw)
         self.criterion = nn.CrossEntropyLoss().to(device)
-        self.optimizer = torch.optim.AdamW(params=self.model.parameters(), lr=lr)
-        self.scheduler = CosineAnnealingLR(self.optimizer, T_max=total_epoch)
+        self.optimizer = torch.optim.SGD(params=self.model.parameters(), lr=lr, momentum=0.9)
+        # self.scheduler = CosineAnnealingLR(self.optimizer, T_max=total_epoch)
         self.device = device
         self.lr = lr
         self.state = self.flat(deepcopy(init_state)).to(device)
@@ -55,7 +55,7 @@ class Trainer:
     def local_train(self, n_epoch):
         for _ in range(n_epoch):
             self.train()
-            self.scheduler.step()
+            # self.scheduler.step()
 
     def get_grad(self):
         return self.flat(self.model.state_dict()) - self.state
@@ -64,6 +64,13 @@ class Trainer:
         self.state += grad
         new_state = self.unflat(self.state, self.shapes)
         self.model.load_state_dict(new_state)
+        
+    def set_weight(self, weight):
+        self.state = weight
+        self.model.load_state_dict(self.unflat(self.state, self.shapes))
+        
+    def get_weight(self):
+        return self.flat(self.model.state_dict())
 
     def test(self, dataloader=None):
         self.model.eval()

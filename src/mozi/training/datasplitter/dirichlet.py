@@ -3,8 +3,8 @@ from torch.utils.data import Dataset
 import numpy as np
 
 class DirichletSplitter(DataSplitter):
-    def __init__(self, dataset: Dataset, n_client: int, alpha: float) -> None:
-        super().__init__(dataset, n_client)
+    def __init__(self, dataset: Dataset, n_client: int, root_data_size: int = 0, alpha: float = 0.1) -> None:
+        super().__init__(dataset, n_client, root_data_size)
         self.alpha = alpha
         
     def calc_split_map(self):
