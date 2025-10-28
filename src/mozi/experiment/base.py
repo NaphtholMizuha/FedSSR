@@ -3,6 +3,7 @@ from .classic import ClassicFLHandler
 from .fedssr import FedSSRHandler
 from .bsrfl import BSRFLHandler
 from .rflpa import RFLPAHandler
+from .rfed import RFedHandler
 from dataclasses import dataclass
 from loguru import logger
 from typing import Literal, List
@@ -93,6 +94,8 @@ class Experiment:
             self.handler = BSRFLHandler(self)
         elif config.method == "rflpa":
             self.handler = RFLPAHandler(self)
+        elif config.method == 'rfed':
+            self.handler = RFedHandler(self)
         else:
             raise ValueError(f"Unknown method: {config.method}")
 
