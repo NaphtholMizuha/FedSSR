@@ -35,10 +35,6 @@ class CreditRegressor:
             selected_index (torch.Tensor): The indices of clients selected by each server.
             n_server (int): The number of servers.
         """
-        # scores is now 1D, shape (n_server,)
-        _, sorted_indices = torch.sort(scores, descending=True)
-
-
         new_data_points = []
         for k in range(n_server):
             participation_vector = np.zeros(self.n_client)
@@ -46,7 +42,6 @@ class CreditRegressor:
             participation_vector[selected_clients.cpu().numpy()] = 1
             target_vector = scores[k].cpu().numpy()
             new_data_points.append((participation_vector, target_vector))
-
 
         self.history.extend(new_data_points)
         if len(self.history) > self.max_history_size:
@@ -80,21 +75,20 @@ class CreditRegressor:
             return None
 
         X_train = np.array([item[0] for item in self.history])
-        y_train = np.array([item[1] for item in self.history])  # y_train is now 1D
+        y_train = np.array([item[1] for item in self.history])
 
         if np.isnan(y_train).any():
             logger.warning("NaNs found in y_train, filling with 0.")
             y_train = np.nan_to_num(y_train)
 
-        # sample_importance can still be calculated on 1D y_train
-        sample_importance = np.abs(y_train) + 0.1
+        # sample_importance = np.linalg.norm(y_train, axis=1) + 0.1
         try:
-            self.model.fit(X_train, y_train, sample_weight=sample_importance)
-            # For single-target regression, model.coef_ is 1D, shape (n_features,)
-            new_credits_vector = torch.from_numpy(self.model.coef_).float()
-            logger.success("Single-target credit model retrained. Credits updated.")
-            logger.info(f"New credit:\n{new_credits_vector}")
-            return new_credits_vector
+            self.model.fit(X_train, y_train)
+            # For single-target, model.coef_ is (n_features,)
+            new_credits = torch.from_numpy(self.model.coef_).float()
+            logger.success("Credit model retrained. Credits updated.")
+            logger.info(f"New credit shape: {new_credits.shape}")
+            return new_credits
         except Exception as e:
             logger.error(f"Failed to train credit model: {e}")
             logger.error(

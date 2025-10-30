@@ -17,6 +17,8 @@ def aggregate(grads: Tensor, method: str, **kwargs) -> Tensor:
     match method:
         case 'fedavg':
             return fedavg(grads)
+        case 'weighted':
+            return weighted_fedavg(grads, **kwargs)
         case 'trimmed_mean':
             return trimmed_mean(grads, **kwargs)
         case 'krum':
@@ -42,6 +44,12 @@ def fedavg(grads: Tensor) -> Tensor:
         Aggregated gradient
     """
     return grads.mean(dim=0)
+
+def weighted_fedavg(grads: Tensor, weights: Tensor) -> Tensor:
+    if torch.all(weights == 0):
+        weights = torch.ones_like(weights)
+    weights = weights / (weights.sum() + 1e-8)
+    return (grads * weights.unsqueeze(1)).sum(dim=0)
 
 def trimmed_mean(grads: Tensor, prop: float = 0.8) -> Tensor:
     """Implement trimmed mean aggregation

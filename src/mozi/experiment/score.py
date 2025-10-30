@@ -27,17 +27,24 @@ def _rescale_scores(scores: torch.Tensor) -> torch.Tensor:
     return (scores - mean) / std
 
 
-def _cos_sim_mat(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
+def cos_sim_mat(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
     """
     Calculates the cosine similarity matrix between two sets of vectors.
+    Handles cases where X or Y might be 1-dimensional by unsqueezing them.
 
     Args:
-        X (torch.Tensor): The first set of vectors (m x d).
-        Y (torch.Tensor): The second set of vectors (n x d).
+        X (torch.Tensor): The first set of vectors (m x d or d, if 1D).
+        Y (torch.Tensor): The second set of vectors (n x d or d, if 1D).
 
     Returns:
         torch.Tensor: The cosine similarity matrix (m x n).
     """
+    # Handle 1D inputs by unsqueezing to 2D
+    if X.dim() == 1:
+        X = X.unsqueeze(0)
+    if Y.dim() == 1:
+        Y = Y.unsqueeze(0)
+
     X_norm = F.normalize(X, dim=1)
     Y_norm = F.normalize(Y, dim=1)
     return X_norm.matmul(Y_norm.T)
@@ -83,7 +90,7 @@ def _rand_sim_mat(X: torch.Tensor, Y: torch.Tensor, d_proj: int = 1000) -> torch
     rand_proj = torch.randn(d, d_proj, device=X.device)
     X_proj = X @ rand_proj
     Y_proj = Y @ rand_proj
-    return _cos_sim_mat(X_proj, Y_proj)
+    return cos_sim_mat(X_proj, Y_proj)
 
 
 
@@ -110,7 +117,7 @@ def _calc_chunk_scores(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 
     local_stats = _get_chunk_stats(x)
     probe_stats = _get_chunk_stats(y)
-    return _cos_sim_mat(local_stats, probe_stats)
+    return cos_sim_mat(local_stats, probe_stats)
 
 
 def calculate_scores(
@@ -119,7 +126,7 @@ def calculate_scores(
     score_types: list[str] | None = None,
 ) -> torch.Tensor:
     """
-    Calculates a single-dimensional score for each server by averaging multiple score types.
+    Calculates a multi-dimensional score for each server.
 
     Args:
         client_updates (torch.Tensor): Updates from all clients.
@@ -127,16 +134,22 @@ def calculate_scores(
         score_types (list[str], optional): A list of score types to calculate. Defaults to all.
 
     Returns:
-        torch.Tensor: A 1D tensor of final scores for each server.
+        torch.Tensor: A 2D tensor of final scores (m x k) for each server.
     """
     if score_types is None:
         score_types = ["cos", "sgn", "dist"]
 
     raw_scores_list = []
     calculated_score_names = []
+    
+    # Handle 1D inputs by unsqueezing to 2D
+    if server_updates.dim() == 1:
+        server_updates = server_updates.unsqueeze(0)
+    if client_updates.dim() == 1:
+        client_updates = client_updates.unsqueeze(0)
 
     if "cos" in score_types:
-        cos_scores = _cos_sim_mat(server_updates, client_updates)
+        cos_scores = cos_sim_mat(server_updates, client_updates)
         raw_scores_list.append(cos_scores)
         calculated_score_names.append("cos")
 
@@ -149,7 +162,7 @@ def calculate_scores(
         c_neg_ratio = (client_updates < 0).float().mean(dim=1)
         c_ratios = torch.stack([c_pos_ratio, c_neg_ratio], dim=1)
 
-        sgn_scores = _cos_sim_mat(s_ratios, c_ratios)
+        sgn_scores = cos_sim_mat(s_ratios, c_ratios)
         raw_scores_list.append(sgn_scores)
         calculated_score_names.append("sgn")
 
@@ -173,7 +186,7 @@ def calculate_scores(
         logger.warning(
             "No valid score types provided, returning zero scores for all servers."
         )
-        return torch.zeros(server_updates.shape[0])
+        return torch.zeros(server_updates.shape[0], len(score_types) or 1)
 
     # 1. First aggregation: Take the median per client to get server scores.
     server_scores_per_type = [s.median(dim=1).values for s in raw_scores_list]
@@ -185,9 +198,7 @@ def calculate_scores(
     # 3. Second aggregation: Stack and average across score types.
     final_scores_matrix = torch.stack(standardized_server_scores, dim=1)
 
-    log_message = f"Final scores matrix (m x k) with types: {calculated_score_names}\n{final_scores_matrix}"
-    logger.info(log_message)
-
+    # 4. Final aggregation: Average across score types to get a single score per server.
     final_scores = final_scores_matrix.mean(dim=1)
 
     return final_scores.cpu()

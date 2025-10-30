@@ -7,7 +7,7 @@ wheels/
 log/
 *.egg-info
 conf/
-
+output/
 # Virtual environments
 .venv
 

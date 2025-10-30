@@ -49,6 +49,12 @@ def process_logs(output_format=None):
                 on="condition",
                 values="avg_acc"
             ).sort("algorithm")
+            
+            df_pivot = df_pivot.filter(pl.col("algorithm") != "FedMozi")
+
+            if "noattack" in df_pivot.columns:
+                cols = ["algorithm", "noattack"] + [col for col in df_pivot.columns if col not in ["algorithm", "noattack"]]
+                df_pivot = df_pivot.select(cols)
 
             if output_format == 'latex':
                 print(df_pivot.to_pandas().to_latex(index=False))
