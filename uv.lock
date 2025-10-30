@@ -158,6 +158,7 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "tabulate" },
+    { name = "tiny-imagenet-torch" },
     { name = "toml" },
     { name = "torch", version = "2.8.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.8.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
@@ -180,6 +181,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.7.2" },
     { name = "scipy", specifier = ">=1.16.2" },
     { name = "tabulate", specifier = ">=0.9.0" },
+    { name = "tiny-imagenet-torch", specifier = ">=0.1.0" },
     { name = "toml", specifier = ">=0.10.2" },
     { name = "torch", marker = "sys_platform != 'linux'", specifier = ">=2.7.0", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torch", marker = "sys_platform == 'linux'", specifier = ">=2.7.0", index = "https://download.pytorch.org/whl/cu128" },
@@ -702,6 +704,26 @@ wheels = [
 ]
 
 [[package]]
+name = "tiny-imagenet-torch"
+version = "0.1.0"
+source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "torch", version = "2.8.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
+    { name = "torch", version = "2.8.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "torch", version = "2.8.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux'" },
+    { name = "torchvision", version = "0.23.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
+    { name = "torchvision", version = "0.23.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
+    { name = "torchvision", version = "0.23.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux'" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/d8/4c/52cb00bf606fdbdf24255e7f5809c909c93df70afd1aa987851fffccdd29/tiny_imagenet_torch-0.1.0.tar.gz", hash = "sha256:35d3a9f53af3b32e040fd8c4797022e344f1995298c781090993ce81ef4bafe8" }
+wheels = [
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/d9/76/78c9c3bfdb8488a8c7ee48d0b2515680d7e0301fdfd407daed43e1901bf5/tiny_imagenet_torch-0.1.0-py3-none-any.whl", hash = "sha256:17a975d07ffeac2cc03f8a4532ca32ac20c056a23c7f6b0764b18921bae7cddc" },
+]
+
+[[package]]
 name = "toml"
 version = "0.10.2"
 source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
@@ -838,6 +860,18 @@ dependencies = [
 wheels = [
     { url = "https://download.pytorch.org/whl/cu128/torchvision-0.23.0%2Bcu128-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:c63982f1973ba677b37e6663df0e07cb5381459b6f0572c2ca95eebd8dfeb742" },
     { url = "https://download.pytorch.org/whl/cu128/torchvision-0.23.0%2Bcu128-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:0d6ff6489eb71e4c0bb08cf7cb253298c2520458b1bd67036733652acfa87f00" },
+]
+
+[[package]]
+name = "tqdm"
+version = "4.67.1"
+source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/a8/4b/29b4ef32e036bb34e4ab51796dd745cdba7ed47ad142a9f4a1eb8e0c744d/tqdm-4.67.1.tar.gz", hash = "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2" }
+wheels = [
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/d0/30/dc54f88dd4a2b5dc8a0279bdd7270e735851848b762aeb1c1184ed1f6b14/tqdm-4.67.1-py3-none-any.whl", hash = "sha256:26445eca388f82e72884e0d580d5464cd801a3ea01e63e5601bdff9ba6a48de2" },
 ]
 
 [[package]]

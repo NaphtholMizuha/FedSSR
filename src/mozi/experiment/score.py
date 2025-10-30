@@ -141,6 +141,12 @@ def calculate_scores(
 
     raw_scores_list = []
     calculated_score_names = []
+    
+    # Handle 1D inputs by unsqueezing to 2D
+    if server_updates.dim() == 1:
+        server_updates = server_updates.unsqueeze(0)
+    if client_updates.dim() == 1:
+        client_updates = client_updates.unsqueeze(0)
 
     if "cos" in score_types:
         cos_scores = cos_sim_mat(server_updates, client_updates)
@@ -192,7 +198,7 @@ def calculate_scores(
     # 3. Second aggregation: Stack and average across score types.
     final_scores_matrix = torch.stack(standardized_server_scores, dim=1)
 
-    log_message = f"Final scores matrix (m x k) with types: {calculated_score_names}\n{final_scores_matrix}"
-    logger.info(log_message)
+    # 4. Final aggregation: Average across score types to get a single score per server.
+    final_scores = final_scores_matrix.mean(dim=1)
 
-    return final_scores_matrix.cpu()
+    return final_scores.cpu()

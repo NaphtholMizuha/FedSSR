@@ -81,14 +81,14 @@ class CreditRegressor:
             logger.warning("NaNs found in y_train, filling with 0.")
             y_train = np.nan_to_num(y_train)
 
-        sample_importance = np.linalg.norm(y_train, axis=1) + 0.1
+        # sample_importance = np.linalg.norm(y_train, axis=1) + 0.1
         try:
-            self.model.fit(X_train, y_train, sample_weight=sample_importance)
-            # For multi-target, model.coef_ is (n_targets, n_features)
-            new_credits_matrix = torch.from_numpy(self.model.coef_).float().T
-            logger.success("Multi-target credit model retrained. Credits updated.")
-            logger.info(f"New credit matrix shape: {new_credits_matrix.shape}")
-            return new_credits_matrix
+            self.model.fit(X_train, y_train)
+            # For single-target, model.coef_ is (n_features,)
+            new_credits = torch.from_numpy(self.model.coef_).float()
+            logger.success("Credit model retrained. Credits updated.")
+            logger.info(f"New credit shape: {new_credits.shape}")
+            return new_credits
         except Exception as e:
             logger.error(f"Failed to train credit model: {e}")
             logger.error(
