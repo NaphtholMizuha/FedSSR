@@ -53,7 +53,7 @@ class FedSSRHandler:
             client_updates, self.exp.attack, self.exp.m_client, self.exp.n_client
         )
 
-        # trusted_client_indices = self._get_trusted_clients()
+        trusted_client_num = self._get_trusted_clients().numel()
 
         # global_update = aggregate(client_updates[trusted_client_indices], "fedavg")
 
@@ -68,10 +68,12 @@ class FedSSRHandler:
         if self.exp.frac > 0:
             # select client sbubsets for credit model training
             num_selected = int(self.exp.frac * self.exp.n_client)
+            if trusted_client_num != self.exp.n_client:
+                num_selected = trusted_client_num
             if num_selected == 0:
                 num_selected = 1
             selected_index = self._select_clients(
-                num_selected=int(self.exp.frac * self.exp.n_client), temperature=0.01
+                num_selected=int(self.exp.frac * self.exp.n_client), temperature=0.1
             )
 
             mali = torch.sum(selected_index < self.exp.m_client, dim=1)
@@ -193,11 +195,11 @@ class FedSSRHandler:
         return torch.stack(
             [
                 torch.multinomial(
-                    torch.softmax(self.credit / (temperature * 10**i), dim=0).cpu() ,
+                    torch.softmax(self.credit / temperature, dim=0).cpu() ,
                     num_samples=num_selected,
                     replacement=False,
                 )
-                for i in range(self.exp.n_server)
+                for _ in range(self.exp.n_server)
             ]
         )
 
