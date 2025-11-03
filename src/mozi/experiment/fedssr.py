@@ -27,6 +27,8 @@ class FedSSRHandler:
         self.credit = torch.zeros(self.exp.n_client)
         self.init_state = self.exp.clients[0].state.clone()
         self.rollback = True
+        self.prev_global_update = None
+        self.use_prev_global_update_scoring = False
 
     def run_round(self, r: int):
         """
@@ -78,7 +80,16 @@ class FedSSRHandler:
             # aggregate and score
             server_updates = self._get_server_updates(client_updates, selected_index)
             
-            if hasattr(self.exp, 'root'):
+            if self.use_prev_global_update_scoring:
+                logger.info("Using previous global update for scoring.")
+                reference_update = self.prev_global_update
+                if reference_update is None:
+                    reference_update = torch.zeros_like(server_updates[0])
+                scores = score.calculate_scores(
+                    reference_update, server_updates, self.exp.score_types
+                )
+            elif hasattr(self.exp, 'root'):
+                logger.info("Using root client for scoring.")
                 root = self.exp.root
                 root.local_train(self.exp.n_epoch)
                 clean_update = root.get_grad()
@@ -86,6 +97,7 @@ class FedSSRHandler:
                     clean_update, server_updates, self.exp.score_types
                 )
             else:
+                logger.info("Using client updates for scoring.")
                 scores = score.calculate_scores(
                     client_updates, server_updates, self.exp.score_types
                 )
@@ -95,6 +107,9 @@ class FedSSRHandler:
 
             if self.regressor.should_retrain(r):
                 logger.info(f"Round {r}: Retraining credit model")
+                if not hasattr(self.exp, 'root'):
+                    logger.info("Switching to use previous global update for scoring.")
+                    self.use_prev_global_update_scoring = True
                 new_credits = self.regressor.train_and_get_credits()
                 if new_credits is not None:
                     self.credit = new_credits
@@ -113,6 +128,7 @@ class FedSSRHandler:
 
         logger.debug(f"Round {r}: Welcome our new winner: {winner.item()}!")
         global_update = server_updates[winner]
+        self.prev_global_update = global_update
 
         for client in self.exp.clients:
             client.set_grad(global_update)
