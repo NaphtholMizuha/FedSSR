@@ -50,7 +50,7 @@ class FedSSRHandler:
             client_updates, self.exp.attack, self.exp.m_client, self.exp.n_client
         )
 
-        # trusted_client_indices = self._get_trusted_clients()
+        trusted_client_indices = self._get_trusted_clients()
 
         # global_update = aggregate(client_updates[trusted_client_indices], "fedavg")
 
@@ -65,6 +65,8 @@ class FedSSRHandler:
         if self.exp.frac > 0:
             # select client sbubsets for credit model training
             num_selected = int(self.exp.frac * self.exp.n_client)
+            if trusted_client_indices != self.exp.n_client:
+                num_selected = trusted_client_indices
             if num_selected == 0:
                 num_selected = 1
             selected_index = self._select_clients(
