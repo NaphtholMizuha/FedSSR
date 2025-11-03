@@ -32,14 +32,15 @@ class CreditRegressor:
 
         Args:
             scores (torch.Tensor): The scores of the server updates.
-            selected_index (torch.Tensor): The indices of clients selected by each server.
+            selected_index (list[torch.Tensor]): A list of tensors, where each tensor contains the indices of clients selected by a server.
             n_server (int): The number of servers.
         """
         new_data_points = []
         for k in range(n_server):
             participation_vector = np.zeros(self.n_client)
             selected_clients = selected_index[k]
-            participation_vector[selected_clients.cpu().numpy()] = 1
+            if len(selected_clients) > 0:
+                participation_vector[selected_clients.cpu().numpy()] = 1
             target_vector = scores[k].cpu().numpy()
             new_data_points.append((participation_vector, target_vector))
 
@@ -81,9 +82,9 @@ class CreditRegressor:
             logger.warning("NaNs found in y_train, filling with 0.")
             y_train = np.nan_to_num(y_train)
 
-        # sample_importance = np.linalg.norm(y_train, axis=1) + 0.1
+        sample_importance = np.abs(y_train) + 0.1
         try:
-            self.model.fit(X_train, y_train)
+            self.model.fit(X_train, y_train, sample_weight=sample_importance)
             # For single-target, model.coef_ is (n_features,)
             new_credits = torch.from_numpy(self.model.coef_).float()
             logger.success("Credit model retrained. Credits updated.")
