@@ -32,7 +32,7 @@ class Trainer:
         self.test_loader = DataLoader(test_set, batch_size=bs, num_workers=nw)
         self.criterion = nn.CrossEntropyLoss().to(device)
         self.optimizer = torch.optim.SGD(params=self.model.parameters(), lr=lr, momentum=0.9)
-        self.scheduler = StepLR(self.optimizer, step_size=total_epoch//3, gamma=0.1)
+        self.scheduler = StepLR(self.optimizer, step_size=total_epoch//4, gamma=0.5)
         self.device = device
         self.lr = lr
         self.state = self.flat(deepcopy(init_state)).to(device)

@@ -1,6 +1,5 @@
 import torch
 from loguru import logger
-from sklearn.cluster import KMeans, DBSCAN
 import numpy as np
 from ..aggregation import aggregate
 from ..attack import attack
@@ -26,6 +25,8 @@ class FedSSRHandler:
         self.exp = experiment
         self.regressor = CreditRegressor(n_client=self.exp.n_client)
         self.credit = torch.zeros(self.exp.n_client)
+        self.init_state = self.exp.clients[0].state.clone()
+        self.rollback = True
 
     def run_round(self, r: int):
         """
@@ -49,15 +50,15 @@ class FedSSRHandler:
             client_updates, self.exp.attack, self.exp.m_client, self.exp.n_client
         )
 
-        trusted_client_indices = self._get_trusted_clients()
+        # trusted_client_indices = self._get_trusted_clients()
 
-        global_update = aggregate(client_updates[trusted_client_indices], "fedavg")
+        # global_update = aggregate(client_updates[trusted_client_indices], "fedavg")
 
-        num_mali_in_trusted = (trusted_client_indices < self.exp.m_client).sum().item()
-        logger.info(
-            f"Round {r}: Aggregating {len(trusted_client_indices)} clients from the trusted cluster. "
-            f"{num_mali_in_trusted} are malicious."
-        )
+        # num_mali_in_trusted = (trusted_client_indices < self.exp.m_client).sum().item()
+        # logger.info(
+        #     f"Round {r}: Aggregating {len(trusted_client_indices)} clients from the trusted cluster. "
+        #     f"{num_mali_in_trusted} are malicious."
+        # )
 
         # The rest is for credit model training.
         # It requires frac > 0 for client selection.
@@ -67,15 +68,15 @@ class FedSSRHandler:
             if num_selected == 0:
                 num_selected = 1
             selected_index = self._select_clients(
-                num_selected=num_selected
+                num_selected=int(self.exp.frac * self.exp.n_client), temperature=0.01
             )
 
             mali = torch.sum(selected_index < self.exp.m_client, dim=1)
+
             logger.debug(f"Round {r}: Server Selection for credit model:\n {mali}.")
 
             # aggregate and score
             server_updates = self._get_server_updates(client_updates, selected_index)
-
             
             if hasattr(self.exp, 'root'):
                 root = self.exp.root
@@ -98,7 +99,20 @@ class FedSSRHandler:
                 if new_credits is not None:
                     self.credit = new_credits
 
+
             self._log_credit_stats()
+            
+        winner = scores.argmax()
+
+        # Check if the winner is the best choice
+        if mali[winner] > mali.min():
+            logger.warning(
+                f"Round {r}: Winner {winner.item()} has {mali[winner]} malicious clients, "
+                f"while the best server has {mali.min()}."
+            )
+
+        logger.debug(f"Round {r}: Welcome our new winner: {winner.item()}!")
+        global_update = server_updates[winner]
 
         for client in self.exp.clients:
             client.set_grad(global_update)
@@ -113,48 +127,34 @@ class FedSSRHandler:
 
     def _get_trusted_clients(self) -> torch.Tensor:
         """
-        Selects trusted clients using k-means clustering on credit scores.
-        It chooses the cluster with the higher average credit score.
+        Selects trusted clients based on their credit scores.
 
         Returns:
-            torch.Tensor: Indices of clients in the trusted cluster.
+            torch.Tensor: Indices of clients with credit > 0.
         """
-        kmeans = KMeans(n_clusters=2, random_state=0, n_init='auto').fit(self.credit.cpu().numpy().reshape(-1, 1))
-        labels = kmeans.labels_
+        return torch.where(self.credit >= 0)[0]
 
-        cluster_0_indices = np.where(labels == 0)[0]
-        cluster_1_indices = np.where(labels == 1)[0]
-
-        # Handle empty clusters
-        if len(cluster_0_indices) == 0:
-            return torch.from_numpy(cluster_1_indices)
-        if len(cluster_1_indices) == 0:
-            return torch.from_numpy(cluster_0_indices)
-
-        # Calculate the mean credit for each cluster
-        mean_credit_0 = self.credit[cluster_0_indices].mean()
-        mean_credit_1 = self.credit[cluster_1_indices].mean()
-
-        # Choose the cluster with the higher average credit
-        if mean_credit_0 > mean_credit_1:
-            return torch.from_numpy(cluster_0_indices)
-        else:
-            return torch.from_numpy(cluster_1_indices)
-
-    def _select_clients(self, num_selected: int) -> torch.Tensor:
+    def _select_clients(
+        self, num_selected: int, temperature: float = 0.1
+    ) -> torch.Tensor:
         """
-        Selects clients for participation uniformly at random.
+        Selects clients for participation based on their credits using multinomial sampling.
 
         Args:
             num_selected (int): The number of clients to select for each server.
+            temperature (float): The temperature for the softmax function.
 
         Returns:
             torch.Tensor: A tensor of selected client indices for each server.
         """
         return torch.stack(
             [
-                torch.randperm(self.exp.n_client)[:num_selected]
-                for _ in range(self.exp.n_server)
+                torch.multinomial(
+                    torch.softmax(self.credit / (temperature * 10**i), dim=0).cpu() ,
+                    num_samples=num_selected,
+                    replacement=False,
+                )
+                for i in range(self.exp.n_server)
             ]
         )
 
@@ -166,7 +166,7 @@ class FedSSRHandler:
 
         Args:
             client_updates (torch.Tensor): A tensor of all client updates.
-            selected_index (torch.Tensor): A tensor of selected client indices for each server.
+            selected_index (list[torch.Tensor]): A list of tensors of selected client indices for each server.
 
         Returns:
             torch.Tensor: A tensor of aggregated server updates.
