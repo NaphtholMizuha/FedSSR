@@ -3,6 +3,7 @@ from .cifar import get_cifar10, get_cifar100
 from .imagenette import get_imagenette, get_imagewoof
 from .fmnist import get_fmnist
 from .food101 import get_food101
+from .tiny_imagenet import get_tiny_imagenet
 
 def fetch_dataset(path: str, dataset: str) -> tuple[Dataset, Dataset]:
     if dataset == 'cifar10':
@@ -17,5 +18,7 @@ def fetch_dataset(path: str, dataset: str) -> tuple[Dataset, Dataset]:
         return get_fmnist(path, True), get_fmnist(path, False)
     elif dataset == 'food101':
         return get_food101(path, True), get_food101(path, False)
+    elif dataset == 'tiny-imagenet':
+        return get_tiny_imagenet(path, True), get_tiny_imagenet(path, False)
     else:
         raise Exception(f"Unsupported Dataset: {dataset}")
