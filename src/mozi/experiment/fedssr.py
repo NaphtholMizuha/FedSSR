@@ -65,12 +65,12 @@ class FedSSRHandler:
         if self.exp.frac > 0:
             # select client sbubsets for credit model training
             num_selected = int(self.exp.frac * self.exp.n_client)
-            if trusted_client_indices != self.exp.n_client:
-                num_selected = trusted_client_indices
+            if trusted_client_indices.numel() != self.exp.n_client:
+                num_selected = trusted_client_indices.numel()
             if num_selected == 0:
                 num_selected = 1
             selected_index = self._select_clients(
-                num_selected=int(self.exp.frac * self.exp.n_client), temperature=0.01
+                num_selected=int(self.exp.frac * self.exp.n_client), temperature=1e-3
             )
 
             mali = torch.sum(selected_index < self.exp.m_client, dim=1)
