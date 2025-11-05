@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import StepLR, CosineAnnealingLR
 from torch.utils.data import Dataset, DataLoader
 from typing import Dict, Tuple
 from copy import deepcopy
@@ -31,8 +31,9 @@ class Trainer:
         )
         self.test_loader = DataLoader(test_set, batch_size=bs, num_workers=nw)
         self.criterion = nn.CrossEntropyLoss().to(device)
-        self.optimizer = torch.optim.SGD(params=self.model.parameters(), lr=lr, momentum=0.9)
-        self.scheduler = StepLR(self.optimizer, step_size=total_epoch//4, gamma=0.5)
+        self.optimizer = torch.optim.SGD(params=self.model.parameters(), lr=lr, momentum=0.9, weight_decay=5e-4)
+        # self.scheduler = StepLR(self.optimizer, step_size=total_epoch//4, gamma=0.2)
+        self.scheduler = CosineAnnealingLR(self.optimizer, T_max=total_epoch)
         self.device = device
         self.lr = lr
         self.state = self.flat(deepcopy(init_state)).to(device)
@@ -55,7 +56,7 @@ class Trainer:
     def local_train(self, n_epoch):
         for _ in range(n_epoch):
             self.train()
-            # self.scheduler.step()
+            self.scheduler.step()
 
     def get_grad(self):
         return self.flat(self.model.state_dict()) - self.state

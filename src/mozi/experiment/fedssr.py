@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from .base import Experiment
 
 MIN_TEMPERATURE = 0.05
-IMPORTANCE_TEMPERATURE = 0.1
+IMPORTANCE_TEMPERATURE = 1
 
 class FedSSRHandler:
     def __init__(self, experiment: "Experiment"):
@@ -50,30 +50,13 @@ class FedSSRHandler:
             client_updates, self.exp.attack, self.exp.m_client, self.exp.n_client
         )
 
-        trusted_client_indices = self._get_trusted_clients()
-
-        # global_update = aggregate(client_updates[trusted_client_indices], "fedavg")
-
-        # num_mali_in_trusted = (trusted_client_indices < self.exp.m_client).sum().item()
-        # logger.info(
-        #     f"Round {r}: Aggregating {len(trusted_client_indices)} clients from the trusted cluster. "
-        #     f"{num_mali_in_trusted} are malicious."
-        # )
-
-        # The rest is for credit model training.
-        # It requires frac > 0 for client selection.
         if self.exp.frac > 0:
             # select client sbubsets for credit model training
-            num_selected = int(self.exp.frac * self.exp.n_client)
-            if trusted_client_indices.numel() != self.exp.n_client:
-                num_selected = trusted_client_indices.numel()
-            if num_selected == 0:
-                num_selected = 1
             selected_index = self._select_clients(
-                num_selected=int(self.exp.frac * self.exp.n_client), temperature=1e-3
+                num_selected=self.exp.n_client // 2, temperature=1e-1
             )
 
-            mali = torch.sum(selected_index < self.exp.m_client, dim=1)
+            mali = torch.tensor([torch.sum(s < self.exp.m_client) for s in selected_index])
 
             logger.debug(f"Round {r}: Server Selection for credit model:\n {mali}.")
 
@@ -104,17 +87,26 @@ class FedSSRHandler:
 
             self._log_credit_stats()
             
-        winner = scores.argmax()
+            if torch.all(self.credit == 0):
+                logger.info("All client credits are zero, using highest score server for global update.")
+                # If multiple score types are used, average them to get a single score per server.
+                agg_scores = scores.mean(dim=1) if scores.ndim > 1 else scores
+                best_server_idx = torch.argmax(agg_scores)
+                logger.debug(f"Round {r}: Selected server {best_server_idx} with highest score {agg_scores[best_server_idx]}.")
+                global_update = server_updates[best_server_idx]
+            else:
+                # Top-1 server selection based on client credits
+                server_credits_list = []
+                for server_selection in selected_index:
+                    server_credits_list.append(self.credit[server_selection].sum())
+                server_credits = torch.stack(server_credits_list)
 
-        # Check if the winner is the best choice
-        if mali[winner] > mali.min():
-            logger.warning(
-                f"Round {r}: Winner {winner.item()} has {mali[winner]} malicious clients, "
-                f"while the best server has {mali.min()}."
-            )
+                # Select the server with the highest total credit
+                best_server_idx = torch.argmax(server_credits)
+                logger.debug(f"Round {r}: Selected server {best_server_idx} with credit {server_credits[best_server_idx]}.")
 
-        logger.debug(f"Round {r}: Welcome our new winner: {winner.item()}!")
-        global_update = server_updates[winner]
+                # Global update is the update from the best server
+                global_update = server_updates[best_server_idx]
 
         for client in self.exp.clients:
             client.set_grad(global_update)
@@ -127,7 +119,7 @@ class FedSSRHandler:
         logger.success(f"Round {r}: Loss: {loss:.4f}, Acc: {acc * 100:.2f}!")
         return loss, acc
 
-    def _get_trusted_clients(self) -> torch.Tensor:
+    def _get_trusted_clients() -> torch.Tensor:
         """
         Selects trusted clients based on their credit scores.
 
@@ -138,27 +130,34 @@ class FedSSRHandler:
 
     def _select_clients(
         self, num_selected: int, temperature: float = 0.1
-    ) -> torch.Tensor:
+    ) -> list:
         """
-        Selects clients for participation based on their credits using multinomial sampling.
-
-        Args:
-            num_selected (int): The number of clients to select for each server.
-            temperature (float): The temperature for the softmax function.
-
-        Returns:
-            torch.Tensor: A tensor of selected client indices for each server.
+        Selects clients for participation based on their credit scores using weighted random sampling.
+        Clients with higher credit have a higher probability of being selected.
         """
-        return torch.stack(
-            [
-                torch.multinomial(
-                    torch.softmax(self.credit / (temperature * 10**i), dim=0).cpu() ,
-                    num_samples=num_selected,
-                    replacement=False,
-                )
-                for i in range(self.exp.n_server)
-            ]
-        )
+        # Fallback to random selection if all credits are zero
+        if torch.all(self.credit == 0):
+            logger.info("All client credits are zero, falling back to random selection.")
+            all_indices = torch.arange(self.exp.n_client)
+            selections = []
+            for _ in range(self.exp.n_server):
+                perm = torch.randperm(self.exp.n_client)
+                selections.append(all_indices[perm[:num_selected]])
+            return selections
+
+        # Use softmax on credits to get sampling probabilities.
+        # Higher temperature -> more uniform/random selection
+        # Lower temperature -> more greedy selection (picking high-credit clients)
+        probs = torch.softmax(self.credit / temperature, dim=0)
+
+        selections = []
+        for _ in range(self.exp.n_server):
+            # Sample `num_selected` clients without replacement based on the probabilities
+            selected_indices = torch.multinomial(
+                probs, num_samples=num_selected, replacement=False
+            )
+            selections.append(selected_indices)
+        return selections
 
     def _get_server_updates(
         self, client_updates: torch.Tensor, selected_index: torch.Tensor
