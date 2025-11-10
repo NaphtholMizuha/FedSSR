@@ -50,7 +50,7 @@ def process_logs(output_format=None):
                 values="avg_acc"
             ).sort("algorithm")
             
-            # df_pivot = df_pivot.filter(pl.col("algorithm") != "FedMozi")
+            df_pivot = df_pivot.filter(pl.col("algorithm") != "FedMozi")
 
             if "noattack" in df_pivot.columns:
                 cols = ["algorithm", "noattack"] + [col for col in df_pivot.columns if col not in ["algorithm", "noattack"]]

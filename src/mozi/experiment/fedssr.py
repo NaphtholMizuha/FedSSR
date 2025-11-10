@@ -52,8 +52,11 @@ class FedSSRHandler:
 
         if self.exp.frac > 0:
             # select client sbubsets for credit model training
+            num_selected = (self.credit > 0).sum().item()
+            if num_selected == 0:
+                num_selected = self.exp.n_client // 2
             selected_index = self._select_clients(
-                num_selected=self.exp.n_client // 2, temperature=1e-1
+                num_selected=num_selected, temperature=1e-1
             )
 
             mali = torch.tensor([torch.sum(s < self.exp.m_client) for s in selected_index])
@@ -93,7 +96,7 @@ class FedSSRHandler:
                 agg_scores = scores.mean(dim=1) if scores.ndim > 1 else scores
                 best_server_idx = torch.argmax(agg_scores)
                 logger.debug(f"Round {r}: Selected server {best_server_idx} with highest score {agg_scores[best_server_idx]}.")
-                global_update = server_updates[best_server_idx]
+                global_update = torch.zeros_like(client_updates[0])
             else:
                 # Top-1 server selection based on client credits
                 server_credits_list = []
@@ -107,6 +110,7 @@ class FedSSRHandler:
 
                 # Global update is the update from the best server
                 global_update = server_updates[best_server_idx]
+                
 
         for client in self.exp.clients:
             client.set_grad(global_update)
@@ -119,14 +123,6 @@ class FedSSRHandler:
         logger.success(f"Round {r}: Loss: {loss:.4f}, Acc: {acc * 100:.2f}!")
         return loss, acc
 
-    def _get_trusted_clients() -> torch.Tensor:
-        """
-        Selects trusted clients based on their credit scores.
-
-        Returns:
-            torch.Tensor: Indices of clients with credit > 0.
-        """
-        return torch.where(self.credit >= 0)[0]
 
     def _select_clients(
         self, num_selected: int, temperature: float = 0.1
@@ -148,15 +144,16 @@ class FedSSRHandler:
         # Use softmax on credits to get sampling probabilities.
         # Higher temperature -> more uniform/random selection
         # Lower temperature -> more greedy selection (picking high-credit clients)
-        probs = torch.softmax(self.credit / temperature, dim=0)
-
         selections = []
+        temp = temperature
         for _ in range(self.exp.n_server):
+            probs = torch.softmax(self.credit / temp, dim=0)
             # Sample `num_selected` clients without replacement based on the probabilities
             selected_indices = torch.multinomial(
                 probs, num_samples=num_selected, replacement=False
             )
             selections.append(selected_indices)
+            temp *= 2
         return selections
 
     def _get_server_updates(

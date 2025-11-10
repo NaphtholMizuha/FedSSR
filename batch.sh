@@ -1,5 +1,23 @@
 #!/bin/bash
 
+# Default value for method
+method_arg=""
+
+# Parse command-line arguments
+while [[ $# -gt 0 ]]; do
+    key="$1"
+    case $key in
+        --method)
+        method_arg="$2"
+        shift # past argument
+        shift # past value
+        ;; 
+        *)
+        shift # past argument
+        ;; 
+    esac
+done
+
 # 确保日志目录存在
 mkdir -p log
 
@@ -9,6 +27,9 @@ shopt -s nullglob
 for conf in conf/*.toml; do
     # 跳过空匹配（虽然 nullglob 已处理，双重保险）
     [[ -f "$conf" ]] || continue
+
+    # 如果传递了 method 参数，则修改配置文件
+    
 
     # 提取文件名（不含路径和 .toml 后缀）
     name=$(basename "$conf" .toml)
@@ -26,7 +47,16 @@ for conf in conf/*.toml; do
 
     # 启动新的后台 tmux 会话
     # 注意：tmux 会将命令传给 sh，因此需确保变量正确引用
-    tmux new-session -d -s "$name" "uv run -m src.main -c '$conf'"
+    
+
+    if [[ -n "$method_arg" ]]; then
+        tmux new-session -d -s "$name" "uv run -m src.main -c '$conf' --method '$method_arg'"
+    else
+        tmux new-session -d -s "$name" "uv run -m src.main -c '$conf'"
+    fi
+    
+
+
 
     echo "Tmux session '$name' created for config '$conf'."
 done
