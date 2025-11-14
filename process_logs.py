@@ -7,7 +7,7 @@ import pandas as pd
 
 def process_logs(output_format=None):
     try:
-        files = glob.glob("/home/wuzihou/code/FedMozi/log/**/*.parquet", recursive=True)
+        files = glob.glob("/home/wuzihou/code/FedMozi-1/log/resnet/**/*.parquet", recursive=True)
 
         if not files:
             print("No .parquet files found in the log directory.")
