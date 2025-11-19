@@ -102,8 +102,17 @@ class DataSplitter(ABC):
         
         # 4. Convert relative client indices to absolute indices
         client_idcs_map_absolute = []
+        pool_size = len(self.client_pool_indices)
+        
         for relative_indices in client_idcs_map_relative:
-            absolute_indices = [self.client_pool_indices[i] for i in relative_indices]
+            # Fix: Check if indices are out of bounds for the pool (implying they are already absolute)
+            if len(relative_indices) > 0 and np.max(relative_indices) >= pool_size:
+                # Indices are likely absolute (returned by a splitter that ignores the Subset wrapper)
+                absolute_indices = relative_indices
+            else:
+                # Indices are relative, map them using the pool
+                absolute_indices = [self.client_pool_indices[i] for i in relative_indices]
+            
             client_idcs_map_absolute.append(absolute_indices)
 
         # 5. Create the final Subset objects
