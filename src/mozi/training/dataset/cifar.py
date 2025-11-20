@@ -34,10 +34,10 @@ def get_cifar100(path: str, train: bool = True):
     if train:
         tf = transforms.Compose([
             transforms.ToTensor(),
+            transforms.RandomCrop(32, padding=4),
             transforms.Normalize(mean=[0.5071, 0.4867, 0.4408],std=[0.2675, 0.2565, 0.2761]),
             transforms.RandomHorizontalFlip(),
-            transforms.RandomVerticalFlip(),
-            # transforms.RandomCrop(32, padding=4),
+            
         ])
     else:
         tf = transforms.Compose([
