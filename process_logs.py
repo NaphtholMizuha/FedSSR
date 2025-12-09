@@ -6,10 +6,13 @@ import argparse
 import pandas as pd
 import numpy as np
 
-def process_logs(output_format=None):
+
+def process_logs(log_path=None, output_format=None):
     try:
         # 1. 寻找文件
-        log_path = "/home/wuzihou/code/FedMozi-1/log/shufflenet-dir/**/*.parquet"
+        if log_path is None:
+            log_path = "/home/wuzihou/code/FedMozi-1/log/resnet/**/*.parquet"
+        
         files = glob.glob(log_path, recursive=True)
 
         if not files:
@@ -21,7 +24,13 @@ def process_logs(output_format=None):
         for file in files:
             try:
                 p = Path(file)
-                algorithm = p.parts[-3]
+                # 确保路径足够深以包含算法名称
+                if len(p.parts) >= 3:
+                    algorithm = p.parts[-3]
+                else:
+                    # 如果路径不够深，使用父目录名称
+                    algorithm = p.parent.name
+                    
                 condition = p.stem
 
                 df = pl.read_parquet(file)
@@ -96,8 +105,27 @@ def process_logs(output_format=None):
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process log files and output a summary table.')
-    parser.add_argument('--format', type=str, choices=['latex', 'markdown'], help='Output format for the table.')
+    parser.add_argument('--path', type=str, help='Path pattern to search for parquet files (supports glob patterns).')
+    parser.add_argument('--format', type=str, choices=['latex', 'markdown', 'csv', 'excel'], 
+                       help='Output format for the table.')
+    parser.add_argument('--output', type=str, help='Output file path (for csv or excel formats).')
+    
     args = parser.parse_args()
-    process_logs(args.format)
+    
+    # 调用处理函数
+    process_logs(
+        log_path=args.path,
+        output_format=args.format
+    )
+    
+    # 可选：保存到文件
+    if args.output and hasattr(args, 'df_pivot'):
+        if args.format == 'csv':
+            args.df_pivot.to_csv(args.output, index=True)
+            print(f"Saved to {args.output}")
+        elif args.format == 'excel':
+            args.df_pivot.to_excel(args.output, index=True)
+            print(f"Saved to {args.output}")

@@ -30,16 +30,7 @@ def _rescale_scores(scores: torch.Tensor) -> torch.Tensor:
 def cos_sim_mat(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
     """
     Calculates the cosine similarity matrix between two sets of vectors.
-    Handles cases where X or Y might be 1-dimensional by unsqueezing them.
-
-    Args:
-        X (torch.Tensor): The first set of vectors (m x d or d, if 1D).
-        Y (torch.Tensor): The second set of vectors (n x d or d, if 1D).
-
-    Returns:
-        torch.Tensor: The cosine similarity matrix (m x n).
     """
-    # Handle 1D inputs by unsqueezing to 2D
     if X.dim() == 1:
         X = X.unsqueeze(0)
     if Y.dim() == 1:
@@ -52,39 +43,18 @@ def cos_sim_mat(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
 
 def _dist_sim_mat(X: torch.Tensor, Y: torch.Tensor, gamma: float = 1.0) -> torch.Tensor:
     """
-    Calculates similarity based on the ratio of Euclidean distance to the norm of the client_update.
-    The ratio is then converted to a similarity score using an exponential function.
-
-    Args:
-        X (torch.Tensor): The server updates (m x d).
-        Y (torch.Tensor): The client updates (n x d).
-        gamma (float): The gamma parameter for the exponential conversion.
-
-    Returns:
-        torch.Tensor: The similarity matrix (m x n).
+    Calculates similarity based on Euclidean distance.
     """
     dist = torch.cdist(X, Y, p=2)
     norm_Y = torch.norm(Y, dim=1)
-
-    # Use a small epsilon to avoid division by zero for zero vectors
     norm_Y = norm_Y + 1e-9
-
     ratio = dist / norm_Y
-
     return torch.exp(-gamma * ratio)
 
 
 def _rand_sim_mat(X: torch.Tensor, Y: torch.Tensor, d_proj: int = 1000) -> torch.Tensor:
     """
     Calculates cosine similarity after random projection.
-
-    Args:
-        X (torch.Tensor): The first set of vectors (m x d).
-        Y (torch.Tensor): The second set of vectors (n x d).
-        d_proj (int): The dimension of the random projection space.
-
-    Returns:
-        torch.Tensor: The cosine similarity matrix (m x n).
     """
     d = X.shape[1]
     rand_proj = torch.randn(d, d_proj, device=X.device)
@@ -93,31 +63,44 @@ def _rand_sim_mat(X: torch.Tensor, Y: torch.Tensor, d_proj: int = 1000) -> torch
     return cos_sim_mat(X_proj, Y_proj)
 
 
-
-
 def _calc_chunk_scores(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     """
     Calculates cosine similarity on stds of chunks.
-
-    Args:
-        x (torch.Tensor): The first set of vectors (m x d).
-        y (torch.Tensor): The second set of vectors (n x d).
-
-    Returns:
-        torch.Tensor: The chunk-based similarity matrix (m x n).
     """
-
     def _get_chunk_stats(t: torch.Tensor, n_chunks: int = 1000):
-        """Computes std for chunks of a tensor."""
         chunks = torch.chunk(t, chunks=n_chunks, dim=1)
         stds_list = [torch.std(c, dim=1, unbiased=True) for c in chunks]
-        # Stack them to get a (n, n_chunks) tensor for the stat
         stds = torch.stack(stds_list, dim=1)
         return stds
 
     local_stats = _get_chunk_stats(x)
     probe_stats = _get_chunk_stats(y)
     return cos_sim_mat(local_stats, probe_stats)
+
+
+def _mag_sim_mat(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
+    """
+    Calculates magnitude similarity based on the ratio of norms.
+    The score is calculated as min(|x|, |y|) / max(|x|, |y|).
+    Result is in [0, 1], where 1 means identical magnitude.
+
+    Args:
+        X (torch.Tensor): The first set of vectors (m x d).
+        Y (torch.Tensor): The second set of vectors (n x d).
+
+    Returns:
+        torch.Tensor: The magnitude similarity matrix (m x n).
+    """
+    # Calculate L2 norms
+    norm_X = torch.norm(X, dim=1, keepdim=True)  # Shape: (m, 1)
+    norm_Y = torch.norm(Y, dim=1, keepdim=True).T  # Shape: (1, n)
+    
+    # Use broadcasting to calculate pair-wise comparisons
+    min_norm = torch.min(norm_X, norm_Y)
+    max_norm = torch.max(norm_X, norm_Y)
+    
+    # Calculate ratio (small epsilon to prevent div by zero)
+    return min_norm / (max_norm + 1e-9)
 
 
 def calculate_scores(
@@ -131,23 +114,24 @@ def calculate_scores(
     Args:
         client_updates (torch.Tensor): Updates from all clients.
         server_updates (torch.Tensor): Aggregated updates from all servers.
-        score_types (list[str], optional): A list of score types to calculate. Defaults to all.
+        score_types (list[str], optional): A list of score types. Defaults include 'mag'.
 
     Returns:
         torch.Tensor: A 2D tensor of final scores (m x k) for each server.
     """
+    # 默认添加 'mag' 到 score_types
     if score_types is None:
-        score_types = ["cos", "sgn", "dist"]
+        score_types = ["cos", "sgn", "dist", "mag"]
 
     raw_scores_list = []
     calculated_score_names = []
     
-    # Handle 1D inputs by unsqueezing to 2D
     if server_updates.dim() == 1:
         server_updates = server_updates.unsqueeze(0)
     if client_updates.dim() == 1:
         client_updates = client_updates.unsqueeze(0)
 
+    # --- Existing Scores ---
     if "cos" in score_types:
         cos_scores = cos_sim_mat(server_updates, client_updates)
         raw_scores_list.append(cos_scores)
@@ -180,7 +164,12 @@ def calculate_scores(
         rand_scores = _rand_sim_mat(server_updates, client_updates)
         raw_scores_list.append(rand_scores)
         calculated_score_names.append("rand")
-        
+
+    # --- New Mag Score ---
+    if "mag" in score_types:
+        mag_scores = _mag_sim_mat(server_updates, client_updates)
+        raw_scores_list.append(mag_scores)
+        calculated_score_names.append("mag")
 
     if not raw_scores_list:
         logger.warning(
@@ -190,15 +179,18 @@ def calculate_scores(
 
     # 1. First aggregation: Take the median per client to get server scores.
     server_scores_per_type = [s.median(dim=1).values for s in raw_scores_list]
-    log_message = f"raw scores matrix (m x k) with types: {calculated_score_names}\n{server_scores_per_type}"
+    
+    # Log info about shapes (optional debug improvement)
+    log_message = f"Calculated scores: {calculated_score_names}"
     logger.info(log_message)
-    # 2. Standardization: Apply Z-score normalization to each score type's vector.
+    
+    # 2. Standardization: Apply Z-score normalization.
     standardized_server_scores = [_rescale_scores(s) for s in server_scores_per_type]
 
     # 3. Second aggregation: Stack and average across score types.
     final_scores_matrix = torch.stack(standardized_server_scores, dim=1)
 
-    # 4. Final aggregation: Average across score types to get a single score per server.
+    # 4. Final aggregation: Average across score types.
     final_scores = final_scores_matrix.mean(dim=1)
 
     return final_scores.cpu()
