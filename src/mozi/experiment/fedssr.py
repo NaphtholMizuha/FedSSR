@@ -14,9 +14,6 @@ if TYPE_CHECKING:
 
 MIN_TEMPERATURE = 0.05
 IMPORTANCE_TEMPERATURE = 1
-CONSISTENT_TEMPERATURE = False
-NO_REGRESSION = False
-FIXED_SAMPLE_RATIO = False
 
 class FedSSRHandler:
     def __init__(self, experiment: "Experiment"):
@@ -57,7 +54,7 @@ class FedSSRHandler:
         if self.exp.frac > 0:
             # select client sbubsets for credit model training
             num_selected = (self.credit > 0).sum().item()
-            if num_selected == 0 or FIXED_SAMPLE_RATIO:
+            if num_selected == 0 or self.exp.fixed_sample_ratio:
                 num_selected = self.exp.n_client // 2
             selected_index = self._select_clients(
                 num_selected=num_selected, temperature=1e-1
@@ -83,7 +80,7 @@ class FedSSRHandler:
                 )
             logger.debug(f"Round scores: {scores}")
 
-            if NO_REGRESSION:
+            if self.exp.no_regression:
                 best_server_idx = torch.argmax(scores)
                 logger.debug(f"Round {r}: Selected server {best_server_idx} with score {scores[best_server_idx]}.")
             else:
@@ -155,7 +152,7 @@ class FedSSRHandler:
         selections = []
         temp = temperature
         for _ in range(self.exp.n_server):
-            if FIXED_SAMPLE_RATIO:
+            if self.exp.fixed_sample_ratio:
                 temp = 1
             probs = torch.softmax(self.credit / temp, dim=0)
             # Sample `num_selected` clients without replacement based on the probabilities

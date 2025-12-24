@@ -37,6 +37,11 @@ def main(
     selection_fraction: Annotated[Optional[float], typer.Option(help="Selection fraction")] = None,
     method: Annotated[Optional[str], typer.Option(help="Method (ours/baseline)")] = None,
     score_types: Annotated[Optional[List[str]], typer.Option(help="List of score types to use")] = None,
+    
+    # fedssr specific
+    consistent_temperature: Annotated[Optional[bool], typer.Option(help="Use consistent temperature in client selection")] = None,
+    no_regression: Annotated[Optional[bool], typer.Option(help="Disable regression model for server selection")] = None,
+    fixed_sample_ratio: Annotated[Optional[bool], typer.Option(help="Use fixed sample ratio for client selection")] = None,
 ):
     """
     Run the FedMozi experiment with optional parameter overrides.
@@ -102,6 +107,14 @@ def main(
         config_data['method'] = method
     if score_types is not None:
         config_data['score_types'] = score_types
+    
+    # fedssr specific
+    if consistent_temperature is not None:
+        config_data['consistent_temperature'] = consistent_temperature
+    if no_regression is not None:
+        config_data['no_regression'] = no_regression
+    if fixed_sample_ratio is not None:
+        config_data['fixed_sample_ratio'] = fixed_sample_ratio
     
     config_obj = ExperimentConfig(exp_name=exp_name, **config_data)
     logger.info(config_obj)

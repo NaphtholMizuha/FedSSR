@@ -37,6 +37,9 @@ class ExperimentConfig:
     dir_alpha: float | None = None
     score_types: list[str] | None = None
     clean_data: bool = False
+    consistent_temperature: bool = False
+    no_regression: bool = False
+    fixed_sample_ratio: bool = False
 
 
 class Experiment:
@@ -72,6 +75,9 @@ class Experiment:
         self.score_types = config.score_types
         self.config = config
         self.exp_name = config.exp_name
+        self.consistent_temperature = config.consistent_temperature
+        self.no_regression = config.no_regression
+        self.fixed_sample_ratio = config.fixed_sample_ratio
 
         self.log_dir = "log"
         os.makedirs(self.log_dir, exist_ok=True)
