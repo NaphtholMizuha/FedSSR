@@ -2,7 +2,7 @@ import torch
 from loguru import logger
 from ..aggregation import aggregate
 from ..attack import attack
-
+from ..training.parallel_trainer import create_parallel_trainer
 
 from typing import TYPE_CHECKING
 
@@ -19,10 +19,12 @@ class ClassicFLHandler:
             experiment (Experiment): The main experiment object.
         """
         self.exp = experiment
+        # Initialize parallel trainer
+        self.parallel_trainer = create_parallel_trainer(self.exp.clients, mode="batch")
 
     def run_round(self, r: int):
         """
-        Runs a single round of classic federated learning.
+        Runs a single round of classic federated learning with parallel client training.
 
         Args:
             r (int): The current round number.
@@ -30,9 +32,11 @@ class ClassicFLHandler:
         Returns:
             tuple[float, float]: The loss and accuracy of the global model after the round.
         """
-        logger.info(f"Round {r}: Start Training")
-        for client in self.exp.clients:
-            client.local_train(self.exp.n_epoch)
+        logger.info(f"Round {r}: Start Parallel Training")
+        
+        # Use parallel training instead of sequential
+        self.parallel_trainer.parallel_local_train(self.exp.n_epoch)
+        
         logger.info(f"Round {r}: Training End.")
 
         client_updates = torch.stack([client.get_grad() for client in self.exp.clients])
