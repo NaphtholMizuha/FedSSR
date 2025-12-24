@@ -3,6 +3,7 @@ from loguru import logger
 import torch.nn.functional as F
 from ..aggregation import aggregate
 from ..attack import attack
+from ..training.parallel_trainer import create_parallel_trainer
 from .score import cos_sim_mat
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
@@ -16,20 +17,34 @@ if TYPE_CHECKING:
 class RFLPAHandler:
     def __init__(self, experiment: "Experiment"):
         """
-        Initializes the handler for the classic federated learning (baseline) experiment.
+        Initializes the handler for the RFLPA experiment with parallel training.
 
         Args:
             experiment (Experiment): The main experiment object.
         """
         self.exp = experiment
+        # Initialize parallel trainer
+        self.parallel_trainer = create_parallel_trainer(self.exp.clients, mode="batch")
 
     def run_round(self, r: int):
+        """
+        Runs a single round of RFLPA with parallel client training.
 
+        Args:
+            r (int): The current round number.
+
+        Returns:
+            tuple[float, float]: The loss and accuracy of the global model after the round.
+        """
         root = self.exp.root
-        logger.info(f"Round {r}: Start Training")
-        for client in self.exp.clients:
-            client.local_train(self.exp.n_epoch)
+        logger.info(f"Round {r}: Start Parallel Training")
+        
+        # Use parallel training for clients
+        self.parallel_trainer.parallel_local_train(self.exp.n_epoch)
+        
+        # Train root model separately
         root.local_train(self.exp.n_epoch)
+        
         logger.info(f"Round {r}: Training End.")
 
         client_updates = torch.stack([client.get_grad() for client in self.exp.clients])
@@ -43,8 +58,6 @@ class RFLPAHandler:
         logger.info(client_updates.shape)
         clinet_updates = F.normalize(client_updates, dim=1) * root_norm
         grad_g = aggregate(clinet_updates, "weighted", weights=ts)
-
-        
 
         for client in self.exp.clients:
             client.set_grad(grad_g)

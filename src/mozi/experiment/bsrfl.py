@@ -2,6 +2,7 @@ import torch
 from loguru import logger
 from ..aggregation import aggregate
 from ..attack import attack
+from ..training.parallel_trainer import create_parallel_trainer
 from .score import cos_sim_mat
 
 from typing import TYPE_CHECKING
@@ -13,17 +14,19 @@ if TYPE_CHECKING:
 class BSRFLHandler:
     def __init__(self, experiment: "Experiment"):
         """
-        Initializes the handler for the classic federated learning (baseline) experiment.
+        Initializes the handler for the BSRFL experiment with parallel training.
 
         Args:
             experiment (Experiment): The main experiment object.
         """
         self.exp = experiment
         self.weight_base = torch.Tensor()
+        # Initialize parallel trainer
+        self.parallel_trainer = create_parallel_trainer(self.exp.clients, mode="batch")
 
     def run_round(self, r: int):
         """
-        Runs a single round of classic federated learning.
+        Runs a single round of BSRFL with parallel client training.
 
         Args:
             r (int): The current round number.
@@ -34,14 +37,13 @@ class BSRFLHandler:
         if r == 0:
             self.weight_base = self.exp.clients[-1].get_weight()
             
-        logger.info(f"Round {r}: Start Training")
+        logger.info(f"Round {r}: Start Parallel Training")
         weights_prev = torch.stack([client.get_weight() for client in self.exp.clients])
         
-        for client in self.exp.clients:
-            client.local_train(self.exp.n_epoch)
+        # Use parallel training instead of sequential
+        self.parallel_trainer.parallel_local_train(self.exp.n_epoch)
         
         logger.info(f"Round {r}: Training End.")
-
 
         client_updates = torch.stack([client.get_grad() for client in self.exp.clients])
         client_updates = attack(
