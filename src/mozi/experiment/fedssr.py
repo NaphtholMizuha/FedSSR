@@ -3,6 +3,7 @@ from loguru import logger
 import numpy as np
 from ..aggregation import aggregate
 from ..attack import attack
+from ..training.parallel_trainer import create_parallel_trainer
 from typing import TYPE_CHECKING
 import os
 
@@ -28,6 +29,8 @@ class FedSSRHandler:
         self.credit = torch.zeros(self.exp.n_client)
         self.init_state = self.exp.clients[0].state.clone()
         self.rollback = True
+        # Initialize parallel trainer
+        self.parallel_trainer = create_parallel_trainer(self.exp.clients, mode="batch")
 
     def run_round(self, r: int):
         """
@@ -40,9 +43,11 @@ class FedSSRHandler:
             tuple[float, float]: The loss and accuracy of the global model after the round.
         """
         # local training and simulating attacks
-        logger.info(f"Round {r}: Start Training")
-        for client in self.exp.clients:
-            client.local_train(self.exp.n_epoch)
+        logger.info(f"Round {r}: Start Parallel Training")
+        
+        # Use parallel training instead of sequential
+        self.parallel_trainer.parallel_local_train(self.exp.n_epoch)
+        
         logger.info(f"Round {r}: Training End.")
         client_updates = torch.stack(
             [client.get_grad() for client in self.exp.clients]

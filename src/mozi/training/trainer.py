@@ -56,6 +56,10 @@ class Trainer:
         for _ in range(n_epoch):
             self.train()
             self.scheduler.step()
+    
+    def get_model_copy(self):
+        """Return a copy of the model for parallel training"""
+        return deepcopy(self.model)
 
     def get_grad(self):
         return self.flat(self.model.state_dict()) - self.state
