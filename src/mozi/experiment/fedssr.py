@@ -54,10 +54,12 @@ class FedSSRHandler:
         if self.exp.frac > 0:
             # select client sbubsets for credit model training
             num_selected = (self.credit > 0).sum().item()
-            if num_selected == 0 or self.exp.fixed_sample_ratio:
+            if num_selected == 0:
                 num_selected = self.exp.n_client // 2
+            if self.exp.fixed_sample_ratio:
+                num_selected = int(self.exp.n_client * 0.5)
             selected_index = self._select_clients(
-                num_selected=num_selected, temperature=1e-1
+                num_selected=num_selected, temperature=1e-2
             )
 
             mali = torch.tensor([torch.sum(s < self.exp.m_client) for s in selected_index])
@@ -152,15 +154,16 @@ class FedSSRHandler:
         selections = []
         temp = temperature
         for _ in range(self.exp.n_server):
-            if self.exp.fixed_sample_ratio:
+            if self.exp.consistent_temperature:
                 temp = 1
+            logger.success(f"Temperature: {temp}")
             probs = torch.softmax(self.credit / temp, dim=0)
             # Sample `num_selected` clients without replacement based on the probabilities
             selected_indices = torch.multinomial(
                 probs, num_samples=num_selected, replacement=False
             )
             selections.append(selected_indices)
-            temp *= 2
+            temp *= 5
         return selections
 
     def _get_server_updates(

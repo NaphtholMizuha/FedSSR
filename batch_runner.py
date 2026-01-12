@@ -1,4 +1,3 @@
-
 import typer
 from typing import Annotated, Optional, List
 import os
@@ -15,10 +14,15 @@ def build_command_args(
     n_round: Optional[int], n_epoch: Optional[int], learning_rate: Optional[float], device: Optional[str],
     datapath: Optional[str], batch_size: Optional[int], num_workers: Optional[int], attack: Optional[str],
     aggregation: Optional[str], selection_fraction: Optional[float], method: Optional[str],
-    score_types: Optional[List[str]]
+    score_types: Optional[List[str]],
+    # fedssr specific
+    consistent_temperature: Optional[bool], no_regression: Optional[bool], fixed_sample_ratio: Optional[bool]
 ) -> List[str]:
     """Builds a list of command-line arguments from the given parameters."""
-    args = {
+    
+    # 1. 处理带值的参数 (Value Arguments)
+    # 这些参数生成格式为: --key value
+    value_args = {
         "--model": model, "--dataset": dataset, "--split": split, "--dir_alpha": dir_alpha,
         "--n-client": n_client, "--m-client": m_client, "--n-server": n_server, "--m-server": m_server,
         "--n-round": n_round, "--n-epoch": n_epoch, "--learning-rate": learning_rate, "--device": device,
@@ -28,13 +32,29 @@ def build_command_args(
     }
     
     cmd_args = []
-    for key, value in args.items():
+    
+    for key, value in value_args.items():
         if value is not None:
             if isinstance(value, list):
                 for item in value:
                     cmd_args.extend([key, str(item)])
             else:
                 cmd_args.extend([key, str(value)])
+
+    # 2. 处理布尔类型参数 (Boolean Flags)
+    # Typer 通常使用 --flag 表示 True，--no-flag 表示 False
+    # 这里的逻辑是：如果用户显式传递了 True/False，则生成对应的 Flag；如果是 None，则忽略（使用 config 文件默认值）
+
+    if consistent_temperature is not None:
+        cmd_args.append("--consistent-temperature" if consistent_temperature else "--no-consistent-temperature")
+
+    if fixed_sample_ratio is not None:
+        cmd_args.append("--fixed-sample-ratio" if fixed_sample_ratio else "--no-fixed-sample-ratio")
+
+    if no_regression is not None:
+        # 对于以 no_ 开头的参数，Typer 通常会智能生成 --no-regression (True) 和 --regression (False)
+        cmd_args.append("--no-regression" if no_regression else "--regression")
+
     return cmd_args
 
 @app.command()
@@ -69,6 +89,11 @@ def main(
     selection_fraction: Annotated[Optional[float], typer.Option(help="Selection fraction")] = None,
     method: Annotated[Optional[str], typer.Option(help="Method (ours/baseline)")] = None,
     score_types: Annotated[Optional[List[str]], typer.Option(help="List of score types to use")] = None,
+
+    # fedssr specific
+    consistent_temperature: Annotated[Optional[bool], typer.Option(help="Use consistent temperature in client selection")] = None,
+    no_regression: Annotated[Optional[bool], typer.Option(help="Disable regression model for server selection")] = None,
+    fixed_sample_ratio: Annotated[Optional[bool], typer.Option(help="Use fixed sample ratio for client selection")] = None,
 ):
     """
     Run FedMozi experiments, either for a single config or in batch mode for multiple configs.
@@ -96,7 +121,9 @@ def main(
     extra_args = build_command_args(
         model, dataset, split, dir_alpha, n_client, m_client, n_server, m_server,
         n_round, n_epoch, learning_rate, device, datapath, batch_size, num_workers,
-        attack, aggregation, selection_fraction, method, score_types
+        attack, aggregation, selection_fraction, method, score_types,
+        # Pass new args
+        consistent_temperature, no_regression, fixed_sample_ratio
     )
 
     for conf_file in config_files:
@@ -104,7 +131,7 @@ def main(
             logger.error(f"Config file not found: {conf_file}")
             continue
 
-        session_name = os.path.basename(conf_file).replace('.toml', '')
+        session_name = 'zihou-' + os.path.basename(conf_file).replace('.toml', '')
         log_file = os.path.join(log_dir, f"{session_name}.log")
 
         # Clear old log file

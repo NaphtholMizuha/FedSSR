@@ -1,117 +1,116 @@
-# FedMozi - 联邦学习实验框架
+# FedSSR - Federated Learning Experiment Framework
 
-FedMozi 是一个用于联邦学习实验的Python框架，支持多种攻击和防御方法的研究。
+FedSSR is a Python framework for federated learning experiments, supporting research on various attack and defense methods.
 
-## 项目结构
+## Project Structure
 
-### 核心文件
+### Core Files
 
 #### `src/main.py`
-- **作用**: 项目的主入口文件
-- **功能**: 
-  - 使用 Typer 提供命令行接口
-  - 加载 TOML 配置文件
-  - 支持命令行参数覆盖配置文件参数
-  - 设置日志记录系统
-  - 启动联邦学习实验
+- **Purpose**: Main entry point of the project
+- **Features**: 
+  - Provides command-line interface using Typer
+  - Loads TOML configuration files
+  - Supports command-line parameter overrides for config file parameters
+  - Sets up logging system
+  - Launches federated learning experiments
 
 #### `batch_runner.py`
-- **作用**: 批量实验运行器
-- **功能**:
-  - 支持单个配置文件运行或批量运行所有配置
-  - 使用 tmux 会话管理多个并行实验
-  - 自动清理旧日志文件
-  - 支持所有 main.py 的命令行参数
+- **Purpose**: Batch experiment runner
+- **Features**:
+  - Supports running single configuration file or batch running all configs
+  - Manages multiple parallel experiments using tmux sessions
+  - Automatically cleans old log files
+  - Supports all command-line parameters of main.py
 
 #### `batch.sh`
-- **作用**: Shell脚本版本的批量运行器
-- **功能**:
-  - 遍历 `conf/` 目录下的所有 TOML 配置文件
-  - 为每个配置创建独立的 tmux 会话
-  - 支持 `--method` 参数覆盖
-  - 自动清理旧日志和会话
+- **Purpose**: Shell script version of batch runner
+- **Features**:
+  - Traverses all TOML configuration files in `conf/` directory
+  - Creates independent tmux sessions for each configuration
+  - Supports `--method` parameter override
+  - Automatically cleans old logs and sessions
 
 #### `process_logs.py`
-- **作用**: 实验结果处理和分析工具
-- **功能**:
-  - 读取 Parquet 格式的实验日志
-  - 计算 Top-5 准确率的均值和标准差
-  - 支持多种输出格式（LaTeX、Markdown、CSV、Excel）
-  - 生成实验结果对比表格
+- **Purpose**: Experiment result processing and analysis tool
+- **Features**:
+  - Reads experiment logs in Parquet format
+  - Computes mean and standard deviation of Top-5 accuracy
+  - Supports multiple output formats (LaTeX, Markdown, CSV, Excel)
+  - Generates experiment result comparison tables
 
 #### `logger.py`
-- **作用**: 日志系统配置工具
-- **功能**: 显示 loguru 日志级别信息
+- **Purpose**: Logging system configuration tool
+- **Features**: Displays loguru logging level information
 
-### 配置文件
+### Configuration Files
 
-#### `conf/` 目录
-- **作用**: 存储实验配置文件
+#### `conf/` Directory
+- **Purpose**: Stores experiment configuration files
 
+#### Configuration Parameters
+- **Task Parameters**: Model architecture, dataset, data splitting strategy
+- **System Parameters**: Number of clients, number of servers, training rounds
+- **Training Parameters**: Learning rate, batch size, device configuration
+- **Security Parameters**: Attack type, aggregation method, selection ratio
 
-#### 配置参数说明
-- **任务参数**: 模型架构、数据集、数据分割策略
-- **系统参数**: 客户端数量、服务器数量、训练轮数
-- **训练参数**: 学习率、批次大小、设备配置
-- **安全参数**: 攻击类型、聚合方法、选择比例
+### Log Files
 
-### 日志文件
+#### `log/` Directory
+- **Purpose**: Stores experiment logs and results
+- **Structure**:
+  - `*.log`: Experiment logs in text format
+  - `*.parquet`: Structured experiment data
+  - Various subdirectories store results for different experiment types
 
-#### `log/` 目录
-- **作用**: 存储实验日志和结果
-- **结构**:
-  - `*.log`: 文本格式的实验日志
-  - `*.parquet`: 结构化的实验数据
-  - 各种子目录存储不同实验类型的结果
-
-### 项目配置
+### Project Configuration
 
 #### `pyproject.toml`
-- **作用**: Python 项目配置文件
-- **功能**:
-  - 定义项目依赖（PyTorch、NumPy、Pandas等）
-  - 配置 UV 包管理器
-  - 设置 PyTorch 索引源（CPU/CUDA）
+- **Purpose**: Python project configuration file
+- **Features**:
+  - Defines project dependencies (PyTorch, NumPy, Pandas, etc.)
+  - Configures UV package manager
+  - Sets PyTorch index source (CPU/CUDA)
 
 #### `.python-version`
-- **作用**: 指定 Python 版本（3.13）
+- **Purpose**: Specifies Python version (3.13)
 
 #### `uv.lock`
-- **作用**: UV 包管理器的锁定文件，确保依赖版本一致性
+- **Purpose**: Lock file for UV package manager, ensuring consistent dependency versions
 
-## 使用方法
+## Usage
 
-### 单个实验运行
+### Running Single Experiment
 ```bash
 uv run -m src.main -c conf/0.toml
 ```
 
-### 批量实验运行
+### Running Batch Experiments
 ```bash
-# 使用 Python 批量运行器
+# Using Python batch runner
 uv run batch_runner.py --batch
 
-# 使用 Shell 脚本
+# Using Shell script
 ./batch.sh --method ours
 ```
 
-### 结果处理
+### Processing Results
 ```bash
 uv run process_logs.py --path "log/resnet/**/*.parquet" --format markdown
 ```
 
-## 主要特性
+## Key Features
 
-- 支持多种联邦学习攻击方法（Ascent、Lie、MinMax等）
-- 灵活的配置系统，支持命令行参数覆盖
-- 并行实验执行，使用 tmux 会话管理
-- 完整的日志记录和结果分析工具
-- 支持多种深度学习模型和数据集
-- 可扩展的实验框架设计
+- Supports multiple federated learning attack methods (Ascent, Lie, MinMax, etc.)
+- Flexible configuration system with command-line parameter override support
+- Parallel experiment execution using tmux session management
+- Comprehensive logging and result analysis tools
+- Support for multiple deep learning models and datasets
+- Extensible experimental framework design
 
-## 依赖环境
+## Dependencies
 
 - Python 3.13+
 - PyTorch 2.7.0+
-- UV 包管理器
-- tmux（用于并行实验管理）
+- UV package manager
+- tmux (for parallel experiment management)

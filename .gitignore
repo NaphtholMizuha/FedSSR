@@ -8,6 +8,8 @@ log/
 *.egg-info
 conf/
 output/
+plot/
+fig/
 # Virtual environments
 .venv
 
