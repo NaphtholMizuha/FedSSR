@@ -4,6 +4,7 @@ import numpy as np
 from ..aggregation import aggregate
 from ..attack import attack
 from typing import TYPE_CHECKING
+import os
 
 from .regression import CreditRegressor
 from . import score
@@ -55,8 +56,10 @@ class FedSSRHandler:
             num_selected = (self.credit > 0).sum().item()
             if num_selected == 0:
                 num_selected = self.exp.n_client // 2
+            if self.exp.fixed_sample_ratio:
+                num_selected = int(self.exp.n_client * 0.5)
             selected_index = self._select_clients(
-                num_selected=num_selected, temperature=1e-1
+                num_selected=num_selected, temperature=1e-2
             )
 
             mali = torch.tensor([torch.sum(s < self.exp.m_client) for s in selected_index])
@@ -79,37 +82,41 @@ class FedSSRHandler:
                 )
             logger.debug(f"Round scores: {scores}")
 
-            self.regressor.collect_data(scores, selected_index, self.exp.n_server)
-
-            if self.regressor.should_retrain(r):
-                logger.info(f"Round {r}: Retraining credit model")
-                new_credits = self.regressor.train_and_get_credits()
-                if new_credits is not None:
-                    self.credit = new_credits
-
-
-            self._log_credit_stats()
-            
-            if torch.all(self.credit == 0):
-                logger.info("All client credits are zero, using highest score server for global update.")
-                # If multiple score types are used, average them to get a single score per server.
-                agg_scores = scores.mean(dim=1) if scores.ndim > 1 else scores
-                best_server_idx = torch.argmax(agg_scores)
-                logger.debug(f"Round {r}: Selected server {best_server_idx} with highest score {agg_scores[best_server_idx]}.")
-                global_update = torch.zeros_like(client_updates[0])
+            if self.exp.no_regression:
+                best_server_idx = torch.argmax(scores)
+                logger.debug(f"Round {r}: Selected server {best_server_idx} with score {scores[best_server_idx]}.")
             else:
-                # Top-1 server selection based on client credits
-                server_credits_list = []
-                for server_selection in selected_index:
-                    server_credits_list.append(self.credit[server_selection].sum())
-                server_credits = torch.stack(server_credits_list)
+                self.regressor.collect_data(scores, selected_index, self.exp.n_server)
 
-                # Select the server with the highest total credit
-                best_server_idx = torch.argmax(server_credits)
-                logger.debug(f"Round {r}: Selected server {best_server_idx} with credit {server_credits[best_server_idx]}.")
+                if self.regressor.should_retrain(r):
+                    logger.info(f"Round {r}: Retraining credit model")
+                    new_credits = self.regressor.train_and_get_credits()
+                    if new_credits is not None:
+                        self.credit = new_credits
 
-                # Global update is the update from the best server
-                global_update = server_updates[best_server_idx]
+
+                self._log_credit_stats()
+                
+                if torch.all(self.credit == 0):
+                    logger.info("All client credits are zero, using highest score server for global update.")
+                    # If multiple score types are used, average them to get a single score per server.
+                    agg_scores = scores.mean(dim=1) if scores.ndim > 1 else scores
+                    best_server_idx = torch.argmax(agg_scores)
+                    logger.debug(f"Round {r}: Selected server {best_server_idx} with highest score {agg_scores[best_server_idx]}.")
+                    global_update = torch.zeros_like(client_updates[0])
+                else:
+                    # Top-1 server selection based on client credits
+                    server_credits_list = []
+                    for server_selection in selected_index:
+                        server_credits_list.append(self.credit[server_selection].sum())
+                    server_credits = torch.stack(server_credits_list)
+
+                    # Select the server with the highest total credit
+                    best_server_idx = torch.argmax(server_credits)
+                    logger.debug(f"Round {r}: Selected server {best_server_idx} with credit {server_credits[best_server_idx]}.")
+
+                    # Global update is the update from the best server
+            global_update = server_updates[best_server_idx]
                 
 
         for client in self.exp.clients:
@@ -147,13 +154,16 @@ class FedSSRHandler:
         selections = []
         temp = temperature
         for _ in range(self.exp.n_server):
+            if self.exp.consistent_temperature:
+                temp = 1
+            logger.success(f"Temperature: {temp}")
             probs = torch.softmax(self.credit / temp, dim=0)
             # Sample `num_selected` clients without replacement based on the probabilities
             selected_indices = torch.multinomial(
                 probs, num_samples=num_selected, replacement=False
             )
             selections.append(selected_indices)
-            temp *= 2
+            temp *= 5
         return selections
 
     def _get_server_updates(
